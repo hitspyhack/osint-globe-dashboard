@@ -41,15 +41,25 @@ export default function GlobeCanvas() {
 
       try {
         const imported = await import("globe.gl");
-        const Globe = imported.default;
-        if (cancelled || !globeEl.current || typeof Globe !== "function") return;
+        const Globe = imported.default || imported;
+        if (cancelled || !globeEl.current || typeof Globe !== "function") {
+          console.warn("Globe not a function:", typeof Globe);
+          return;
+        }
 
         animationFrame = requestAnimationFrame(() => {
           if (cancelled || !globeEl.current || globeRef.current) return;
 
           try {
             // globe.gl factory takes the DOM element as its first argument.
-            const instance = Globe(globeEl.current)
+            const instance = Globe(globeEl.current);
+            
+            if (!instance || typeof instance.globeImageUrl !== "function") {
+              console.error("Globe instance not initialized correctly:", instance);
+              return;
+            }
+
+            instance
               .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
               .backgroundColor("#020617")
               .showAtmosphere(true)
@@ -57,8 +67,14 @@ export default function GlobeCanvas() {
               .atmosphereAltitude(0.15)
               .pointOfView({ lat: 20, lng: 0, altitude: 2.5 });
 
-            instance.controls().autoRotate = true;
-            instance.controls().autoRotateSpeed = 0.3;
+            if (instance.controls && typeof instance.controls === "function") {
+              const controls = instance.controls();
+              if (controls) {
+                controls.autoRotate = true;
+                controls.autoRotateSpeed = 0.3;
+              }
+            }
+
             globeRef.current = instance;
             setIsReady(true);
           } catch (error) {
