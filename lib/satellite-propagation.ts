@@ -1,4 +1,4 @@
-import { satrec, propagate, gstime, satellite } from "satellite.js";
+import { Satrec, propagate, gstime, satellite } from "satellite.js";
 
 export interface PropagatedSatellite {
   name: string;
@@ -13,7 +13,7 @@ export interface PropagatedSatellite {
 
 export function propagateSatellite(tleLine1: string, tleLine2: string, timestamp: Date = new Date()): PropagatedSatellite | null {
   try {
-    const sat = satrec(tleLine1, tleLine2);
+    const sat = Satrec.create(tleLine1, tleLine2);
     const positionAndVelocity = propagate(sat, timestamp);
     
     if (!positionAndVelocity.position || !positionAndVelocity.velocity) {
