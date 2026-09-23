@@ -11,7 +11,7 @@ export default function GlobeCanvas() {
   const [selectedCam, setSelectedCam] = useState<Webcam | null>(null);
   const [propagatedSats, setPropagatedSats] = useState<SatellitePropagated[]>([]);
   const [timelineDate, setTimelineDate] = useState<Date>(new Date());
-  const [GlobeModule, setGlobeModule] = useState<any>(null);
+  const [GlobeModule, setGlobeModule] = useState<any>();
   
   const {
     issPosition,
