@@ -13,6 +13,12 @@ export interface PropagatedSatellite {
 
 export function propagateSatellite(tleLine1: string, tleLine2: string, timestamp: Date = new Date()): PropagatedSatellite | null {
   try {
+    // satellite.js v5: Satrec is a class with static create method
+    if (!Satrec || typeof Satrec.create !== 'function') {
+      console.warn("Satrec.create not available, skipping satellite propagation");
+      return null;
+    }
+
     const sat = Satrec.create(tleLine1, tleLine2);
     const positionAndVelocity = propagate(sat, timestamp);
     
