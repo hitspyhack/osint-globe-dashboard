@@ -16,11 +16,14 @@ export function useGlobeData(timelineDate?: Date) {
 
   const dateParam = timelineDate ? `&date=${timelineDate.toISOString().split("T")[0]}` : "";
 
-  // ISS
+  // ISS with fallback
   useEffect(() => {
     const fetchISS = async () => {
       try {
-        const res = await fetch("https://api.open-notify.org/iss-now.json");
+        const res = await fetch("https://api.open-notify.org/iss-now.json", {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) throw new Error("ISS API unavailable");
         const data = await res.json();
         if (data.iss_position) {
           setIssPosition({
@@ -32,7 +35,17 @@ export function useGlobeData(timelineDate?: Date) {
           });
         }
       } catch (e) {
-        console.error("ISS fetch error:", e);
+        console.warn("ISS fetch failed, using fallback:", e);
+        // Fallback: approximate ISS position (random orbit)
+        const fallbackLat = (Math.sin(Date.now() / 60000) * 51.6);
+        const fallbackLng = ((Date.now() / 240000) % 360) - 180;
+        setIssPosition({
+          lat: fallbackLat,
+          lng: fallbackLng,
+          name: "ISS (fallback)",
+          size: 0.5,
+          color: "#38bdf8",
+        });
       }
     };
     fetchISS();
@@ -46,8 +59,12 @@ export function useGlobeData(timelineDate?: Date) {
       try {
         setLoading(true);
         const [eqRes, fireRes] = await Promise.all([
-          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=earthquakes&days=7${dateParam}`),
-          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=volcanoes&days=30${dateParam}`),
+          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=earthquakes&days=7${dateParam}`, {
+            signal: AbortSignal.timeout(10000),
+          }),
+          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=volcanoes&days=30${dateParam}`, {
+            signal: AbortSignal.timeout(10000),
+          }),
         ]);
         const eqData = await eqRes.json();
         const fireData = await fireRes.json();
@@ -103,11 +120,13 @@ export function useGlobeData(timelineDate?: Date) {
   useEffect(() => {
     const fetchAviation = async () => {
       try {
-        const res = await fetch("/api/aviation");
+        const res = await fetch("/api/aviation", {
+          signal: AbortSignal.timeout(15000),
+        });
         const data = await res.json();
         setAircraft(data.aircraft || []);
       } catch (e) {
-        console.error("Aviation fetch error:", e);
+        console.warn("Aviation fetch failed:", e);
       }
     };
     fetchAviation();
@@ -123,7 +142,7 @@ export function useGlobeData(timelineDate?: Date) {
         const data = await res.json();
         setVessels(data.vessels || []);
       } catch (e) {
-        console.error("Maritime fetch error:", e);
+        console.warn("Maritime fetch failed:", e);
       }
     };
     fetchMaritime();
@@ -147,7 +166,7 @@ export function useGlobeData(timelineDate?: Date) {
           ...(weatherData.satellites || []),
         ]);
       } catch (e) {
-        console.error("Satellite fetch error:", e);
+        console.warn("Satellite fetch failed:", e);
       }
     };
     fetchSatellites();
