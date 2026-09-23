@@ -71,11 +71,11 @@ export function useGlobeData(timelineDate?: Date) {
 
         const parseEvents = (events: any[], type: "eq" | "fire") =>
           events
-            .flatMap((e: any) => e.geometries || [])
+            .flatMap((event: any) => (event.geometries || []).map((g: any) => ({ ...g, eventTitle: event.title })))
             .map((g: any) => ({
               lat: g.coordinates[1],
               lng: g.coordinates[0],
-              name: e.title || type,
+              name: g.eventTitle || type,
               size: type === "eq" ? 0.3 : 0.4,
               color: type === "eq" ? "#f472b6" : "#f97316",
             }))
