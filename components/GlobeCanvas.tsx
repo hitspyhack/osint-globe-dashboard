@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Globe from "globe.gl";
 import { useGlobeData } from "@/hooks/useGlobeData";
 import type { DataPoint, Webcam, Aircraft, SatellitePropagated } from "@/types";
 import { propagateSatellites } from "@/lib/satellite-propagation";
 
 export default function GlobeCanvas() {
-  const globeEl = useRef<any>(null);
+  const globeEl = useRef<HTMLDivElement>(null);
   const [globe, setGlobe] = useState<any>(null);
   const [selectedCam, setSelectedCam] = useState<Webcam | null>(null);
   const [propagatedSats, setPropagatedSats] = useState<SatellitePropagated[]>([]);
   const [timelineDate, setTimelineDate] = useState<Date>(new Date());
+  const [GlobeInstance, setGlobeInstance] = useState<any>(null);
   
   const {
     issPosition,
@@ -30,6 +30,25 @@ export default function GlobeCanvas() {
   const [showVessels, setShowVessels] = useState(true);
   const [showAircraft, setShowAircraft] = useState(true);
   const [showSatellites, setShowSatellites] = useState(true);
+
+  // Dynamic import globe.gl (client-side only)
+  useEffect(() => {
+    let isMounted = true;
+    const loadGlobe = async () => {
+      try {
+        const GlobeModule = (await import("globe.gl")).default;
+        if (isMounted && globeEl.current) {
+          setGlobeInstance(GlobeModule);
+        }
+      } catch (e) {
+        console.error("Failed to load globe.gl:", e);
+      }
+    };
+    loadGlobe();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Propagate satellites in real-time
   useEffect(() => {
@@ -50,11 +69,11 @@ export default function GlobeCanvas() {
     setPropagatedSats(propagated);
   }, [satellites, timelineDate]);
 
-  // Initialize globe
+  // Initialize globe (after dynamic import)
   useEffect(() => {
-    if (!globeEl.current) return;
+    if (!GlobeInstance || !globeEl.current || globe) return;
 
-    const g = Globe()
+    const g = GlobeInstance()
       .globeEl(globeEl.current)
       .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
       .backgroundColor("#020617")
@@ -68,7 +87,7 @@ export default function GlobeCanvas() {
     return () => {
       g._destructor?.();
     };
-  }, []);
+  }, [GlobeInstance, globe]);
 
   // Update data layers
   useEffect(() => {
