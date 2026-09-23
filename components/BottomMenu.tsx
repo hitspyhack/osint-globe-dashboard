@@ -37,7 +37,7 @@ export default function BottomMenu() {
             🗺️ Layers
           </button>
           <button className="menu-btn">🔍 Search</button>
-          <button className="menu-btn">📊 Dashboard</button>
+          <button className="menu-btn">🕒 Timeline</button>
           <button className="menu-btn">⚙️ Settings</button>
         </div>
       </div>

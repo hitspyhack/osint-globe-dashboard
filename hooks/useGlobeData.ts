@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import type { DataPoint, Webcam, Vessel, Aircraft, Satellite } from "@/types";
 
-export function useGlobeData() {
+export function useGlobeData(timelineDate?: Date) {
   const [issPosition, setIssPosition] = useState<DataPoint | null>(null);
   const [earthquakes, setEarthquakes] = useState<DataPoint[]>([]);
   const [wildfires, setWildfires] = useState<DataPoint[]>([]);
@@ -13,6 +13,8 @@ export function useGlobeData() {
   const [satellites, setSatellites] = useState<Satellite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const dateParam = timelineDate ? `&date=${timelineDate.toISOString().split("T")[0]}` : "";
 
   // ISS
   useEffect(() => {
@@ -38,14 +40,14 @@ export function useGlobeData() {
     return () => clearInterval(interval);
   }, []);
 
-  // EONET (earthquakes, wildfires)
+  // EONET (earthquakes, wildfires) - supports historical dates
   useEffect(() => {
     const fetchEONET = async () => {
       try {
         setLoading(true);
         const [eqRes, fireRes] = await Promise.all([
-          fetch("https://eonet.gsfc.nasa.gov/api/v2.1/events?category=earthquakes&days=7"),
-          fetch("https://eonet.gsfc.nasa.gov/api/v2.1/events?category=volcanoes&days=30"),
+          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=earthquakes&days=7${dateParam}`),
+          fetch(`https://eonet.gsfc.nasa.gov/api/v2.1/events?category=volcanoes&days=30${dateParam}`),
         ]);
         const eqData = await eqRes.json();
         const fireData = await fireRes.json();
@@ -73,7 +75,7 @@ export function useGlobeData() {
       }
     };
     fetchEONET();
-  }, []);
+  }, [dateParam]);
 
   // Webcams (Windy + OSM)
   useEffect(() => {

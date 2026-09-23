@@ -3,12 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Globe from "globe.gl";
 import { useGlobeData } from "@/hooks/useGlobeData";
-import type { DataPoint, Webcam, Aircraft } from "@/types";
+import type { DataPoint, Webcam, Aircraft, SatellitePropagated } from "@/types";
+import { propagateSatellites } from "@/lib/satellite-propagation";
 
 export default function GlobeCanvas() {
   const globeEl = useRef<any>(null);
   const [globe, setGlobe] = useState<any>(null);
   const [selectedCam, setSelectedCam] = useState<Webcam | null>(null);
+  const [propagatedSats, setPropagatedSats] = useState<SatellitePropagated[]>([]);
+  const [timelineDate, setTimelineDate] = useState<Date>(new Date());
+  
   const {
     issPosition,
     earthquakes,
@@ -26,6 +30,25 @@ export default function GlobeCanvas() {
   const [showVessels, setShowVessels] = useState(true);
   const [showAircraft, setShowAircraft] = useState(true);
   const [showSatellites, setShowSatellites] = useState(true);
+
+  // Propagate satellites in real-time
+  useEffect(() => {
+    if (!satellites.length) {
+      setPropagatedSats([]);
+      return;
+    }
+
+    const satsWithTle = satellites
+      .filter((s) => s.tle && s.noradId)
+      .map((s) => ({
+        name: s.name,
+        noradId: s.noradId!,
+        tle: s.tle!,
+      }));
+
+    const propagated = propagateSatellites(satsWithTle, timelineDate);
+    setPropagatedSats(propagated);
+  }, [satellites, timelineDate]);
 
   // Initialize globe
   useEffect(() => {
@@ -86,12 +109,13 @@ export default function GlobeCanvas() {
           }))
         : []),
       ...(showSatellites
-        ? satellites.map((s) => ({
-            lat: s.lat || 0,
-            lng: s.lng || 0,
+        ? propagatedSats.map((s) => ({
+            lat: s.lat,
+            lng: s.lng,
             name: s.name,
             size: 0.1,
             color: "#34d399",
+            altitude: s.altitude / 6371,
           }))
         : []),
     ];
@@ -125,7 +149,7 @@ export default function GlobeCanvas() {
     webcams,
     vessels,
     aircraft,
-    satellites,
+    propagatedSats,
     showISS,
     showEarthquakes,
     showWildfires,
@@ -142,9 +166,10 @@ export default function GlobeCanvas() {
     globe.controls().autoRotateSpeed = 0.3;
   }, [globe]);
 
-  // Expose toggle methods for parent
+  // Expose globe instance and toggle methods for parent
   useEffect(() => {
     (window as any).__globeToggles = {
+      globe,
       setShowISS,
       setShowEarthquakes,
       setShowWildfires,
@@ -152,8 +177,9 @@ export default function GlobeCanvas() {
       setShowVessels,
       setShowAircraft,
       setShowSatellites,
+      setTimelineDate,
     };
-  }, []);
+  }, [globe]);
 
   return (
     <>

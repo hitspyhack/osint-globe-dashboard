@@ -1,6 +1,6 @@
 {
   "name": "osint-globe-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,7 +17,12 @@
     "three": "^0.170.0",
     "tailwindcss": "^4.0.0",
     "@tailwindcss/postcss": "^4.0.0",
-    "axios": "^1.8.0"
+    "axios": "^1.8.0",
+    "satellite.js": "^5.0.0",
+    "react-leaflet-cluster": "^2.1.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^5.0.0",
+    "workbox-window": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22",

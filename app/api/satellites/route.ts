@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       satellites: satellites.slice(0, 250).map((sat: any) => ({
         name: sat.OBJECT_NAME,
         noradId: sat.NORAD_CAT_ID,
-        tle: `${sat.TLE_LINE1}\n${sat.TLE_LINE2}`,
+        tle: `${sat.TLE_LINE1}\\n${sat.TLE_LINE2}`,
         epoch: sat.EPOCH,
       })),
     });

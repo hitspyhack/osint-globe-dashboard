@@ -60,8 +60,26 @@ export interface Aircraft {
 
 export interface Satellite {
   name: string;
+  noradId?: number;
+  lat?: number;
+  lng?: number;
+  altitude?: number;
+  tle?: string;
+  epoch?: string;
+}
+
+export interface SatellitePropagated extends Satellite {
   lat: number;
   lng: number;
   altitude: number;
-  tle?: string;
+  velocity?: number;
+  footprint?: number;
+}
+
+export interface TimelineState {
+  startDate: string;
+  endDate: string;
+  currentDate: string;
+  playing: boolean;
+  speed: number;
 }
