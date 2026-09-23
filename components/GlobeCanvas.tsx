@@ -73,23 +73,38 @@ export default function GlobeCanvas() {
 
   // Initialize globe (after dynamic import)
   useEffect(() => {
-    if (!GlobeModule || !globeEl.current || globe) return;
+    if (!GlobeModule || typeof GlobeModule !== 'function') {
+      console.warn("GlobeModule not ready");
+      return;
+    }
+    if (!globeEl.current) {
+      console.warn("globeEl.current not ready");
+      return;
+    }
+    if (globe) {
+      console.log("Globe already initialized");
+      return;
+    }
 
-    // GlobeModule is already the function, call it directly
-    const g = GlobeModule()
-      .globeEl(globeEl.current)
-      .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
-      .backgroundColor("#020617")
-      .showAtmosphere(true)
-      .atmosphereColor("#38bdf8")
-      .atmosphereAltitude(0.15)
-      .pointOfView({ lat: 20, lng: 0, altitude: 2.5 });
+    try {
+      // GlobeModule is already the function, call it directly
+      const g = GlobeModule()
+        .globeEl(globeEl.current)
+        .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
+        .backgroundColor("#020617")
+        .showAtmosphere(true)
+        .atmosphereColor("#38bdf8")
+        .atmosphereAltitude(0.15)
+        .pointOfView({ lat: 20, lng: 0, altitude: 2.5 });
 
-    setGlobe(g);
+      setGlobe(g);
 
-    return () => {
-      g._destructor?.();
-    };
+      return () => {
+        g._destructor?.();
+      };
+    } catch (e) {
+      console.error("Failed to initialize globe:", e);
+    }
   }, [GlobeModule, globe]);
 
   // Update data layers
