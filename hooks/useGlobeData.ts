@@ -1,16 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { DataPoint } from "@/types";
+import type { DataPoint, Webcam, Vessel, Aircraft, Satellite } from "@/types";
 
 export function useGlobeData() {
   const [issPosition, setIssPosition] = useState<DataPoint | null>(null);
   const [earthquakes, setEarthquakes] = useState<DataPoint[]>([]);
   const [wildfires, setWildfires] = useState<DataPoint[]>([]);
+  const [webcams, setWebcams] = useState<Webcam[]>([]);
+  const [vessels, setVessels] = useState<Vessel[]>([]);
+  const [aircraft, setAircraft] = useState<Aircraft[]>([]);
+  const [satellites, setSatellites] = useState<Satellite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch ISS position
+  // ISS
   useEffect(() => {
     const fetchISS = async () => {
       try {
@@ -34,7 +38,7 @@ export function useGlobeData() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch NASA EONET events
+  // EONET (earthquakes, wildfires)
   useEffect(() => {
     const fetchEONET = async () => {
       try {
@@ -71,10 +75,90 @@ export function useGlobeData() {
     fetchEONET();
   }, []);
 
+  // Webcams (Windy + OSM)
+  useEffect(() => {
+    const fetchWebcams = async () => {
+      try {
+        const [windyRes, osmRes] = await Promise.all([
+          fetch("/api/webcams/windy?bbox=-180,-85,180,85&limit=200"),
+          fetch("/api/webcams/osm?bbox=-180,-85,180,85"),
+        ]);
+        const windyData = await windyRes.json();
+        const osmData = await osmRes.json();
+        const allWebcams = [
+          ...(windyData.webcams || []),
+          ...(osmData.webcams || []),
+        ];
+        setWebcams(allWebcams.slice(0, 300));
+      } catch (e) {
+        console.error("Webcam fetch error:", e);
+      }
+    };
+    fetchWebcams();
+  }, []);
+
+  // Aviation (OpenSky)
+  useEffect(() => {
+    const fetchAviation = async () => {
+      try {
+        const res = await fetch("/api/aviation");
+        const data = await res.json();
+        setAircraft(data.aircraft || []);
+      } catch (e) {
+        console.error("Aviation fetch error:", e);
+      }
+    };
+    fetchAviation();
+    const interval = setInterval(fetchAviation, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Maritime (AIS placeholder)
+  useEffect(() => {
+    const fetchMaritime = async () => {
+      try {
+        const res = await fetch("/api/maritime");
+        const data = await res.json();
+        setVessels(data.vessels || []);
+      } catch (e) {
+        console.error("Maritime fetch error:", e);
+      }
+    };
+    fetchMaritime();
+  }, []);
+
+  // Satellites (CelesTrak)
+  useEffect(() => {
+    const fetchSatellites = async () => {
+      try {
+        const [stationsRes, starlinkRes, weatherRes] = await Promise.all([
+          fetch("/api/satellites?group=stations"),
+          fetch("/api/satellites?group=starlink"),
+          fetch("/api/satellites?group=weather"),
+        ]);
+        const stationsData = await stationsRes.json();
+        const starlinkData = await starlinkRes.json();
+        const weatherData = await weatherRes.json();
+        setSatellites([
+          ...(stationsData.satellites || []),
+          ...(starlinkData.satellites || []).slice(0, 100),
+          ...(weatherData.satellites || []),
+        ]);
+      } catch (e) {
+        console.error("Satellite fetch error:", e);
+      }
+    };
+    fetchSatellites();
+  }, []);
+
   return {
     issPosition,
     earthquakes,
     wildfires,
+    webcams,
+    vessels,
+    aircraft,
+    satellites,
     loading,
     error,
   };

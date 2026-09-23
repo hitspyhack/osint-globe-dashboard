@@ -4,6 +4,10 @@ export interface DataPoint {
   name?: string;
   size?: number;
   color?: string;
+  altitude?: number;
+  url?: string;
+  embedUrl?: string;
+  imageUrl?: string;
 }
 
 export interface LayerConfig {
@@ -22,4 +26,42 @@ export interface OSINTEvent {
   lng: number;
   timestamp: string;
   source: string;
+}
+
+export interface Webcam {
+  id: string;
+  lat: number;
+  lng: number;
+  title: string;
+  imageUrl?: string;
+  embedUrl?: string;
+  source: "windy" | "osm";
+}
+
+export interface Vessel {
+  mmsi: string;
+  name: string;
+  lat: number;
+  lng: number;
+  speed?: number;
+  course?: number;
+  type?: string;
+}
+
+export interface Aircraft {
+  icao24: string;
+  callsign: string;
+  lat: number;
+  lng: number;
+  altitude?: number;
+  velocity?: number;
+  trueTrack?: number;
+}
+
+export interface Satellite {
+  name: string;
+  lat: number;
+  lng: number;
+  altitude: number;
+  tle?: string;
 }

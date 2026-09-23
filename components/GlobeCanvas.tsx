@@ -2,80 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import Globe from "globe.gl";
-
-interface DataPoint {
-  lat: number;
-  lng: number;
-  name?: string;
-  size?: number;
-  color?: string;
-}
+import { useGlobeData } from "@/hooks/useGlobeData";
+import type { DataPoint, Webcam, Aircraft } from "@/types";
 
 export default function GlobeCanvas() {
   const globeEl = useRef<any>(null);
   const [globe, setGlobe] = useState<any>(null);
-  const [issPosition, setIssPosition] = useState<DataPoint | null>(null);
-  const [earthquakes, setEarthquakes] = useState<DataPoint[]>([]);
-  const [wildfires, setWildfires] = useState<DataPoint[]>([]);
+  const [selectedCam, setSelectedCam] = useState<Webcam | null>(null);
+  const {
+    issPosition,
+    earthquakes,
+    wildfires,
+    webcams,
+    vessels,
+    aircraft,
+    satellites,
+  } = useGlobeData();
+
   const [showISS, setShowISS] = useState(true);
   const [showEarthquakes, setShowEarthquakes] = useState(true);
   const [showWildfires, setShowWildfires] = useState(true);
-
-  // Fetch ISS position
-  useEffect(() => {
-    const fetchISS = async () => {
-      try {
-        const res = await fetch("https://api.open-notify.org/iss-now.json");
-        const data = await res.json();
-        if (data.iss_position) {
-          setIssPosition({
-            lat: parseFloat(data.iss_position.latitude),
-            lng: parseFloat(data.iss_position.longitude),
-            name: "ISS",
-            size: 0.5,
-            color: "#38bdf8",
-          });
-        }
-      } catch (e) {
-        console.error("ISS fetch error:", e);
-      }
-    };
-    fetchISS();
-    const interval = setInterval(fetchISS, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Fetch NASA EONET events (earthquakes, wildfires)
-  useEffect(() => {
-    const fetchEONET = async () => {
-      try {
-        const [eqRes, fireRes] = await Promise.all([
-          fetch("https://eonet.gsfc.nasa.gov/api/v2.1/events?category=earthquakes&days=7"),
-          fetch("https://eonet.gsfc.nasa.gov/api/v2.1/events?category=volcanoes&days=30"),
-        ]);
-        const eqData = await eqRes.json();
-        const fireData = await fireRes.json();
-
-        const parseEvents = (events: any[], type: "eq" | "fire") =>
-          events
-            .flatMap((e: any) => e.geometries || [])
-            .map((g: any) => ({
-              lat: g.coordinates[1],
-              lng: g.coordinates[0],
-              name: e.title || type,
-              size: type === "eq" ? 0.3 : 0.4,
-              color: type === "eq" ? "#f472b6" : "#f97316",
-            }))
-            .slice(0, 100);
-
-        setEarthquakes(parseEvents(eqData.events || [], "eq"));
-        setWildfires(parseEvents(fireData.events || [], "fire"));
-      } catch (e) {
-        console.error("EONET fetch error:", e);
-      }
-    };
-    fetchEONET();
-  }, []);
+  const [showWebcams, setShowWebcams] = useState(true);
+  const [showVessels, setShowVessels] = useState(true);
+  const [showAircraft, setShowAircraft] = useState(true);
+  const [showSatellites, setShowSatellites] = useState(true);
 
   // Initialize globe
   useEffect(() => {
@@ -105,6 +55,45 @@ export default function GlobeCanvas() {
       ...(showISS && issPosition ? [issPosition] : []),
       ...(showEarthquakes ? earthquakes : []),
       ...(showWildfires ? wildfires : []),
+      ...(showWebcams
+        ? webcams.map((cam) => ({
+            lat: cam.lat,
+            lng: cam.lng,
+            name: cam.title,
+            size: 0.25,
+            color: "#22d3ee",
+            imageUrl: cam.imageUrl,
+            embedUrl: cam.embedUrl,
+          }))
+        : []),
+      ...(showVessels
+        ? vessels.map((v) => ({
+            lat: v.lat,
+            lng: v.lng,
+            name: v.name || v.mmsi,
+            size: 0.2,
+            color: "#fbbf24",
+          }))
+        : []),
+      ...(showAircraft
+        ? aircraft.map((a) => ({
+            lat: a.lat,
+            lng: a.lng,
+            name: a.callsign || a.icao24,
+            size: 0.15,
+            color: "#a78bfa",
+            altitude: a.altitude ? a.altitude / 10000 : 0.1,
+          }))
+        : []),
+      ...(showSatellites
+        ? satellites.map((s) => ({
+            lat: s.lat || 0,
+            lng: s.lng || 0,
+            name: s.name,
+            size: 0.1,
+            color: "#34d399",
+          }))
+        : []),
     ];
 
     globe
@@ -112,10 +101,39 @@ export default function GlobeCanvas() {
       .pointLat("lat")
       .pointLng("lng")
       .pointColor("color")
-      .pointAltitude(0.01)
+      .pointAltitude("altitude")
       .pointRadius("size")
-      .pointsMerge(true);
-  }, [globe, issPosition, earthquakes, wildfires, showISS, showEarthquakes, showWildfires]);
+      .pointsMerge(true)
+      .onPointClick((point: any) => {
+        if (point.imageUrl || point.embedUrl) {
+          setSelectedCam({
+            id: point.name,
+            lat: point.lat,
+            lng: point.lng,
+            title: point.name,
+            imageUrl: point.imageUrl,
+            embedUrl: point.embedUrl,
+            source: "windy",
+          });
+        }
+      });
+  }, [
+    globe,
+    issPosition,
+    earthquakes,
+    wildfires,
+    webcams,
+    vessels,
+    aircraft,
+    satellites,
+    showISS,
+    showEarthquakes,
+    showWildfires,
+    showWebcams,
+    showVessels,
+    showAircraft,
+    showSatellites,
+  ]);
 
   // Auto-rotate
   useEffect(() => {
@@ -130,10 +148,41 @@ export default function GlobeCanvas() {
       setShowISS,
       setShowEarthquakes,
       setShowWildfires,
+      setShowWebcams,
+      setShowVessels,
+      setShowAircraft,
+      setShowSatellites,
     };
   }, []);
 
   return (
-    <div id="globe-container" ref={globeEl} className="h-full w-full" />
+    <>
+      <div id="globe-container" ref={globeEl} className="h-full w-full" />
+      {selectedCam && (
+        <div className="absolute bottom-32 right-4 z-20 max-w-sm rounded-lg border border-slate-700 bg-slate-900/95 p-4 shadow-xl backdrop-blur">
+          <div className="mb-2 flex items-start justify-between">
+            <h4 className="text-sm font-semibold text-sky-400">{selectedCam.title}</h4>
+            <button
+              className="text-slate-400 hover:text-slate-200"
+              onClick={() => setSelectedCam(null)}
+            >
+              ✕
+            </button>
+          </div>
+          {selectedCam.embedUrl ? (
+            <iframe
+              src={selectedCam.embedUrl}
+              className="h-40 w-full rounded"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          ) : selectedCam.imageUrl ? (
+            <img src={selectedCam.imageUrl} alt={selectedCam.title} className="h-40 w-full rounded object-cover" />
+          ) : null}
+          <div className="mt-2 text-xs text-slate-400">
+            {selectedCam.lat.toFixed(4)}, {selectedCam.lng.toFixed(4)}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
