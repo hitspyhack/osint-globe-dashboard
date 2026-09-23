@@ -11,7 +11,7 @@ export default function GlobeCanvas() {
   const [selectedCam, setSelectedCam] = useState<Webcam | null>(null);
   const [propagatedSats, setPropagatedSats] = useState<SatellitePropagated[]>([]);
   const [timelineDate, setTimelineDate] = useState<Date>(new Date());
-  const [GlobeInstance, setGlobeInstance] = useState<any>(null);
+  const [GlobeModule, setGlobeModule] = useState<any>(null);
   
   const {
     issPosition,
@@ -36,9 +36,9 @@ export default function GlobeCanvas() {
     let isMounted = true;
     const loadGlobe = async () => {
       try {
-        const GlobeModule = (await import("globe.gl")).default;
-        if (isMounted && globeEl.current) {
-          setGlobeInstance(GlobeModule);
+        const module = await import("globe.gl");
+        if (isMounted) {
+          setGlobeModule(module);
         }
       } catch (e) {
         console.error("Failed to load globe.gl:", e);
@@ -71,9 +71,10 @@ export default function GlobeCanvas() {
 
   // Initialize globe (after dynamic import)
   useEffect(() => {
-    if (!GlobeInstance || !globeEl.current || globe) return;
+    if (!GlobeModule || !globeEl.current || globe) return;
 
-    const g = GlobeInstance()
+    const Globe = GlobeModule.default || GlobeModule;
+    const g = Globe()
       .globeEl(globeEl.current)
       .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
       .backgroundColor("#020617")
@@ -87,7 +88,7 @@ export default function GlobeCanvas() {
     return () => {
       g._destructor?.();
     };
-  }, [GlobeInstance, globe]);
+  }, [GlobeModule, globe]);
 
   // Update data layers
   useEffect(() => {
