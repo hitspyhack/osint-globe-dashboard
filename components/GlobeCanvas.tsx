@@ -36,9 +36,11 @@ export default function GlobeCanvas() {
     let isMounted = true;
     const loadGlobe = async () => {
       try {
+        // globe.gl exports a default function
         const module = await import("globe.gl");
         if (isMounted) {
-          setGlobeModule(module);
+          // The module exports the GlobeGL function as default
+          setGlobeModule(module.default || module);
         }
       } catch (e) {
         console.error("Failed to load globe.gl:", e);
@@ -73,8 +75,8 @@ export default function GlobeCanvas() {
   useEffect(() => {
     if (!GlobeModule || !globeEl.current || globe) return;
 
-    const Globe = GlobeModule.default || GlobeModule;
-    const g = Globe()
+    // GlobeModule is already the function, call it directly
+    const g = GlobeModule()
       .globeEl(globeEl.current)
       .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
       .backgroundColor("#020617")
