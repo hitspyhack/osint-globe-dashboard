@@ -5,7 +5,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ["L", "Toggle the layer dock"],
   ["T", "Toggle the mission clock"],
   ["/", "Focus the location search"],
-  ["R", "Auto-rotate the globe"],
+  ["R", "Toggle the Earth's sidereal spin reference"],
   ["+ / -", "Zoom in / out"],
   ["P", "Screenshot the current frame"],
   ["P", ""],

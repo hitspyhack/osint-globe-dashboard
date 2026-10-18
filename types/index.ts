@@ -103,6 +103,12 @@ export interface LayerStatus {
   needsKey?: boolean;
 }
 
+export type ElevationStatus =
+  | { phase: "off"; progress: number }
+  | { phase: "loading"; progress: number }
+  | { phase: "ready"; progress: number; minMeters?: number; maxMeters?: number }
+  | { phase: "error"; progress: number; error: string };
+
 export type SensorId = "standard" | "nvg" | "flir" | "flir-inv" | "crt" | "noir" | "snow" | "bloom";
 
 export interface SensorDef {
