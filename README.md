@@ -1,132 +1,165 @@
-# OSINT Globe Dashboard
+# OSINT Globe — Godseye Console
 
-3D OSINT globe dashboard with live maritime, aeronautical, terrestrial, satellite, and hazard feeds.
+A live, open-source intelligence console for planet Earth: a 3D globe with
+aircraft, military traffic, ships, satellites, earthquakes, wildfires, public
+cameras, broadcast radio and launch pads — rendered with sensor looks and a
+tactical HUD.
 
-## Features
+Built with **Next.js 15**, **React 19**, **globe.gl / three.js** and **satellite.js**
+(SGP4). No API key is required to boot: nine layers work out of the box.
 
-- 🌍 **3D Globe** (globe.gl + Three.js) with dark OSINT theme
-- 🛰️ **Satellite tracking** (ISS via Open Notify + CelesTrak TLE catalog)
-- 🌋 **Natural hazards** (earthquakes, wildfires via NASA EONET)
-- 🚢 **Maritime data** (AIS - adapter ready for licensed provider)
-- ✈️ **Aeronautical data** (ADS-B via OpenSky Network)
-- 📹 **Webcams worldwide** (Windy API + OSM Overpass)
-- 🔍 **Location search** (Nominatim geocoding)
-- 🗺️ **Bottom expandable menus** for layer toggling
-- 📱 **Mobile-first PWA** ready
+> The HUD, sensor-look and console UX are inspired by
+> [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) (MIT, by
+> Bilawal Sidhu & Sameh Khamis at Halfpixel). This project is an independent
+> implementation on a different stack (Next.js + globe.gl instead of
+> CesiumJS + Vite) and ships no data or assets from that repository.
 
-## Getting Started
+---
+
+## Quick start
 
 ```bash
-# Install dependencies
 npm install
-
-# Copy env example and add your keys
-cp .env.example .env.local
+npm run dev          # http://localhost:3000
 ```
 
-### Required API Keys (optional but recommended)
-
-| Service | Key | Get it from |
-|---------|-----|-------------|
-| Windy Webcams | `WINDY_WEBCAMS_API_KEY` | [Windy API](https://www.windy.com/-Webcams-api-webcams-api?webcams-api) |
-| OpenSky Network | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | [OpenSky](https://opensky-network.org/apidoc) |
-
-Without these keys, the app will still run but some layers will be empty or limited.
+That's it — no keys, no config. Production build:
 
 ```bash
-# Run dev server
-npm run dev
+npm run build && npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+---
 
-## Deploy
+## What's on the globe
 
-### Vercel
+| Layer | What you get | Source | Key |
+|---|---|---|---|
+| ✈ Live Flights | Global ADS-B traffic, altitude-scaled | OpenSky Network · adsb.lol | 🟢 |
+| 🎖 Military Traffic | ADS-B contacts flagged military / state | adsb.lol · airplanes.live | 🟢 |
+| 🚢 Live Vessels | AIS ship positions | AISHub · Spire · MarineTraffic · Datalastic | 🟡 |
+| 🛰 Satellites | 700+ objects, SGP4-propagated in real time, with ground tracks and sensor footprints | CelesTrak GP | 🟢 |
+| 🧑‍🚀 ISS / Crewed | Live position + orbital ground track | Open Notify · CelesTrak | 🟢 |
+| 🌋 Earthquakes | Last 24h (or any pinned day), sized by magnitude, ripple rings for M4.5+ | USGS FDSN | 🟢 |
+| 🔥 Wildfires | EONET incidents, or VIIRS hotspots with a FIRMS key | NASA EONET · NASA FIRMS | 🟢 / 🟡 |
+| ⛰ Volcanoes | Activity, last 30 days | NASA EONET | 🟢 |
+| 🌀 Severe Storms | Tropical cyclones and severe systems | NASA EONET | 🟢 |
+| 📹 Public Cameras | Live thumbnails and embeds | Windy · OpenStreetMap | 🟢 / 🟡 |
+| 📻 Radio Grid | Geo-located broadcast stations — click to listen | Radio Browser | 🟢 |
+| 🚀 Launch Schedule | Upcoming orbital launches with pads, windows and countdown | Launch Library 2 | 🟢 |
+| 🏭 Installations | Airfields, ports, military areas, nuclear plants | OpenStreetMap (Overpass) | 🟢 |
+| 🧭 Graticule / 🌗 Day-Night | 10° grid and a computed sun terminator | generated | 🟢 |
 
-```bash
-npm install -g vercel
-vercel --prod
+🟢 works with no key · 🟡 unlocks or upgrades with a key
+
+---
+
+## Console features
+
+**Sensor looks** — GLSL post-processing on the live 3D scene (not a CSS filter
+over the canvas), plus matching chrome overlays:
+
+| Key | Look | |
+|---|---|---|
+| `1` | **STD** | clean imagery |
+| `2` | **NVG** | green phosphor, gain, halo, rolling scanlines |
+| `3` | **FLIR** | thermal LUT, black-hot |
+| `4` | **WHITE** | thermal LUT, white-hot |
+| `5` | **CRT** | barrel distortion, RGB convergence drift, aperture grille |
+| `6` | **NOIR** | high-contrast monochrome |
+| `7` | **SNOW** | low-light sensor, heavy grain |
+| `8` | **GLOW** | bloom pass for night-side cities |
+
+**Tactical HUD** — corner brackets, centre reticle, scanlines, UTC mission
+clock, camera/pointer telemetry, FPS and draw-call counters, and a per-feed
+health readout so an offline upstream is obvious instead of silent.
+
+**Basemaps** — Esri World Imagery (satellite), CARTO Dark, OSM and Esri Topo,
+served as slippy tiles through three-globe's tile engine with automatic
+fallback if a tile server is unreachable.
+
+**Target dossier** — click any track for its full record (callsign, MMSI, NORAD
+ID, magnitude, depth, footprint, TLE…), plus centre/copy coordinates,
+OpenStreetMap and Street View links, inline camera feeds and live radio audio.
+
+**Mission clock** — scrub the last 30 days; satellite positions are
+re-propagated and USGS/EONET windows follow the pinned time.
+
+**Extras** — location search (`/`), solo/refresh per layer, PNG screenshot
+(`P`), shareable view links, keyboard-only operation (`?` for help), PWA
+offline shell.
+
+---
+
+## Keyboard
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `1`–`8` | sensor look | `L` | layer dock |
+| `/` | focus search | `T` | mission clock |
+| `R` | auto-rotate | `P` | screenshot |
+| `+` / `-` | zoom | `?` | help |
+| `Esc` | clear selection / close panels | | |
+
+---
+
+## POWER UP (optional keys)
+
+Open **POWER UP** in the top right and paste keys for Windy, an AIS provider,
+NASA FIRMS or OpenSky. Keys are stored in that browser's `localStorage` and are
+only ever sent to this app's own `/api/*` routes, which proxy the upstream
+provider — nothing is persisted server-side. Server deployments can set the same
+values in `.env.local` (see `.env.example`).
+
+---
+
+## Architecture
+
+```
+app/
+  api/                 # server proxies: caching, key handling, normalisation
+    aviation/          # OpenSky (global) + adsb.lol (military)
+    maritime/          # AISHub / Spire / Datalastic adapter
+    satellites/        # CelesTrak TLE groups
+    iss/ quakes/ hazards/ fires/ radio/ launches/ infrastructure/ geocode/
+  page.tsx             # the console: state, shortcuts, panels
+components/
+  GlobeView.tsx        # globe.gl scene: points, rings, paths, footprints, post-FX
+  HudFrame.tsx         # reticle, brackets, status strip, telemetry
+  LayerDock.tsx        # feeds, counts, upstream health
+  Dossier.tsx          # selected-track record
+  SensorBar.tsx · TimelineBar.tsx · SearchBar.tsx · PowerUp.tsx · SettingsPanel.tsx
+hooks/useGlobeData.ts  # polling, per-layer status, SGP4 propagation
+lib/
+  layers.ts            # layer + sensor + basemap + key registry
+  sources.ts           # every upstream shape → normalised Entity
+  feeds.ts             # multi-candidate fetch (proxy → direct)
+  sensors.ts           # GLSL sensor looks
+  satellite-propagation.ts  # SGP4 + ground tracks + footprints
+  geo.ts · time.ts · keys.ts · telemetry.ts
 ```
 
-Set your environment variables in the Vercel dashboard.
+**How data flows.** Each layer declares a list of candidate sources — normally
+our own `/api/*` proxy first, the upstream URL second. The proxy is preferred
+because it caches and keeps credentials server-side; the direct browser request
+keeps the console alive when the proxy has no egress (offline dev, locked-down
+sandbox). Everything normalises into one `Entity` shape, so rendering, the HUD
+and the dossier are source-agnostic.
 
-### Netlify
+**Resilience.** Every feed fails independently: a dead upstream marks its layer
+in the dock and leaves a visible status, never a blank globe. Basemaps probe
+their tile server and fall back to the next template, then to a static texture.
 
-```bash
-npm run build
-netlify deploy --prod --dir=.next
-```
+---
 
-## Project Structure
+## Attribution & terms
 
-```
-osint-globe-dashboard/
-├── app/
-│   ├── api/
-│   │   ├── webcams/
-│   │   │   ├── windy/route.ts
-│   │   │   └── osm/route.ts
-│   │   ├── aviation/route.ts
-│   │   ├── maritime/route.ts
-│   │   └── satellites/route.ts
-│   ├── layout.tsx
-│   ├── page.tsx
-│   └── globals.css
-├── components/
-│   ├── GlobeCanvas.tsx
-│   └── BottomMenu.tsx
-├── hooks/
-│   └── useGlobeData.ts
-├── types/
-│   └── index.ts
-├── package.json
-├── next.config.mjs
-├── tsconfig.json
-└── README.md
-```
-
-## Data Sources
-
-| Layer | Source | Auth | Update |
-|-------|--------|------|--------|
-| ISS Position | [Open Notify](http://open-notify.org/Open-Notify-API/ISS-Location-Now/) | None | 5s |
-| Earthquakes | [NASA EONET](https://eonet.gsfc.nasa.gov/api/v2.1/events) | None | On load |
-| Wildfires/Volcanoes | [NASA EONET](https://eonet.gsfc.nasa.gov/api/v2.1/events) | None | On load |
-| Webcams (Windy) | [Windy Webcams API](https://www.windy.com/-Webcams-api-webcams-api?webcams-api) | API key | On load |
-| Webcams (OSM) | [Overpass API](https://overpass-api.de/) | None | On load |
-| Aviation (ADS-B) | [OpenSky Network](https://opensky-network.org/apidoc) | Free account | 30s |
-| Maritime (AIS) | Adapter (configure licensed provider) | - | - |
-| Satellites (TLE) | [CelesTrak](https://celestrak.org/) | None | 1h |
-| Geocoding | [Nominatim](https://nominatim.org/) | None (rate limited) | On search |
-
-## Layer Details
-
-### 1. Webcams Worldwide
-- **Windy API**: ~65k webcams globally with live preview images and timelapse
-- **OSM Overpass**: Community-mapped webcams with `webcam` or `contact:webcam` tags
-- Click a webcam marker to open a preview panel with embed player or snapshot
-
-### 2. Maritime (AIS)
-- Currently returns empty (adapter boundary)
-- Integrate a licensed AIS provider (e.g., Spire, MarineTraffic, exactEarth)
-- Vessels render as amber points with MMSI/name labels
-
-### 3. Aeronautical (ADS-B)
-- OpenSky Network free tier (requires username/password)
-- Shows up to 1000 aircraft with callsign, altitude, velocity
-- Renders as purple points with altitude-based height
-
-### 4. Satellites (TLE)
-- CelesTrak catalogs: space stations, Starlink, weather satellites
-- Up to 250 satellites per group
-- Renders as green points (future: propagate TLE for real-time positions)
-
-### 5. Search Bar
-- Nominatim geocoding (OSM)
-- Typeahead with 5 results max
-- Auto-pans globe to selected location
+Live feeds remain subject to each provider's terms — check before commercial
+use. Notable ones: USGS and NASA EONET/FIRMS are public domain; OpenStreetMap
+and the Radio Browser directory are ODbL / CC; AISHub and OpenSky accounts are
+free for personal use. The console is for research and situational awareness;
+it republishes only what those providers already publish publicly.
 
 ## License
 
-MIT
+MIT. See `PROJECT_STATUS.md` for the roadmap and known limitations.

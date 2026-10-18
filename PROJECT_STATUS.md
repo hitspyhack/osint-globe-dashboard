@@ -1,277 +1,137 @@
-# OSINT Globe Dashboard - Project Status
+# OSINT Globe — Project Status
 
-**Last Updated:** September 23, 2026  
-**Version:** 0.2.0  
-**Status:** ✅ Functional - Ready for Testing
+**Version:** 0.3.0 · **Updated:** 2026-10-18 · **Status:** ✅ Working, verified build
 
 ---
 
-## 🎯 Project Overview
+## What this release changed
 
-3D OSINT globe dashboard with live maritime, aeronautical, terrestrial, satellite, and hazard feeds built with Next.js 15, React 19, and globe.gl.
+The console was rebuilt around a God's-Eye-View style operating model: a
+full-screen tactical HUD over a photorealistic globe, with live feeds that can
+be filtered, inspected and time-scrubbed.
 
-**Repository:** [hitspyhack/osint-globe-dashboard](https://github.com/hitspyhack/osint-globe-dashboard)
+### Added
 
----
+- **Sensor looks** — 8 GLSL post-processing modes (STD, NVG, FLIR, WHITE-HOT,
+  CRT, NOIR, SNOW, GLOW) applied through the globe's `EffectComposer`, with
+  matching CSS chrome and hotkeys `1`–`8`.
+- **Tactical HUD** — reticle, corner brackets, scanlines, UTC mission clock with
+  SIM indicator, camera/pointer telemetry, FPS + draw-call counters, per-feed
+  health readout.
+- **Slippy-tile basemaps** — Esri World Imagery / CARTO Dark / OSM / Esri Topo
+  through three-globe's tile engine, with source probing and graceful fallback.
+- **8 new live layers** — military traffic (adsb.lol), earthquakes (USGS FDSN),
+  wildfires (EONET / FIRMS), volcanoes, severe storms, radio grid, launch
+  schedule, OSM installations. Plus graticule and computed day/night terminator.
+- **Target dossier** — full record per track, sensor footprint polygon for
+  satellites, ground tracks for the ISS and any selected satellite, live audio
+  for radio stations, camera embeds, OSM / Street View links.
+- **Mission clock** — 30-day scrubber that re-propagates satellites and pins
+  USGS/EONET windows to the selected time; playback at 1m–6h per second.
+- **POWER UP** — in-app key panel (localStorage → our API routes only).
+- **Console ops** — location search (`/`), solo/refresh per layer, screenshot
+  (`P`), shareable view links, help (`?`), persisted preferences.
 
-## ✅ Completed Features
+### Fixed
 
-### Core Functionality
-- [x] 3D Globe with globe.gl (dynamic import, client-side only)
-- [x] Dark OSINT theme with custom CSS variables
-- [x] Auto-rotating globe with user controls
-- [x] Responsive design (mobile-first PWA ready)
-
-### Live Data Layers
-- [x] **ISS Tracker** - Real-time position (5s updates) with fallback
-- [x] **Earthquakes** - NASA EONET API (7 days historical)
-- [x] **Wildfires/Volcanoes** - NASA EONET API (30 days historical)
-- [x] **Webcams Worldwide** - Windy API + OSM Overpass (300 max)
-- [x] **Maritime (AIS)** - Adapter pattern ready (Spire, MarineTraffic)
-- [x] **Aeronautical (ADS-B)** - OpenSky Network integration
-- [x] **Satellites (TLE)** - CelesTrak catalog with real-time propagation (satellite.js v5)
-
-### UI Components
-- [x] Bottom expandable menu with layer toggles
-- [x] Location search bar (Nominatim geocoding)
-- [x] Timeline scrubber (7 days, 0.5x-5x speed)
-- [x] Webcam preview panel with embed support
-- [x] Loading state with "Loading globe..." overlay
-
-### Technical Features
-- [x] Dynamic imports for client-side only libraries
-- [x] Error handling and fallbacks for all APIs
-- [x] TypeScript strict mode
-- [x] PWA manifest + service worker (offline support)
-- [x] Hydration error fixes (suppressHydrationWarning)
-
----
-
-## 🔧 Known Issues & Workarounds
-
-### Resolved Issues
-1. ✅ SSR `window is not defined` - Fixed with dynamic imports
-2. ✅ `globe.gl` module access - Fixed with `import("globe.gl").default`
-3. ✅ DOM initialization timing - Fixed with `requestAnimationFrame`
-4. ✅ Globe instance validation - Added null checks before `.controls()`
-5. ✅ `satellite.js` v5 API - Changed from `satrec()` to `Satrec.create()`
-6. ✅ Next.js destructuring bug - Changed `useState(null)` to `useState()`
-7. ✅ ISS API failures - Added fallback position generator
-8. ✅ EONET parseEvents scope - Fixed closure with `eventTitle` property
-
----
-
-## 📁 Project Structure
-
-```
-osint-globe-dashboard/
-├── app/
-│   ├── api/
-│   │   ├── webcams/
-│   │   │   ├── windy/route.ts      # Windy Webcams API adapter
-│   │   │   └── osm/route.ts        # OSM Overpass webcam scraper
-│   │   ├── aviation/route.ts       # OpenSky ADS-B data
-│   │   ├── maritime/route.ts       # AIS provider adapter (Spire, MarineTraffic)
-│   │   └── satellites/route.ts     # CelesTrak TLE catalog
-│   ├── layout.tsx                  # PWA meta tags, viewport
-│   ├── page.tsx                    # Main page with search + timeline
-│   └── globals.css                 # OSINT dark theme CSS
-├── components/
-│   ├── GlobeCanvas.tsx             # 3D globe with all layers
-│   ├── BottomMenu.tsx              # Layer toggle menu
-│   └── TimelineScrubber.tsx        # Historical timeline control
-├── hooks/
-│   └── useGlobeData.ts             # Unified data fetching hook
-├── lib/
-│   └── satellite-propagation.ts    # TLE propagation with satellite.js v5
-├── types/
-│   └── index.ts                    # TypeScript interfaces
-├── public/
-│   ├── manifest.json               # PWA manifest
-│   └── sw.js                       # Service worker (cache-first)
-├── package.json
-├── next.config.mjs
-├── tsconfig.json
-├── .env.example
-└── README.md
-```
+- `npm install` was broken: `react-leaflet-cluster` pinned React 18 against
+  React 19. Removed leaflet, react-leaflet, axios and workbox-window — none
+  were imported anywhere.
+- **Tailwind never compiled**: `@import "tailwindcss"` with no PostCSS config.
+  Added `postcss.config.mjs`.
+- **Satellites never propagated**: the code called `Satrec.create()`, which does
+  not exist in satellite.js v5 (it exports `twoline2satrec`). Every satellite
+  was silently dropped. Rewritten against the real v5 API.
+- **TLE parsing was broken by accident**: routes joined TLE lines with a literal
+  `\n` two-character sequence and the parser split on the same string, so it
+  worked only while both sides stayed wrong. Now real newlines, tolerant
+  parsing (`splitTle`).
+- **Point altitudes were nonsense**: aircraft altitude was divided by 10 000
+  and fed to globe.gl as globe-radius units, putting a 10 km airliner 6 371 km
+  above the surface. Now converted properly and exaggerated only for legibility.
+- **Wildfires layer actually loaded volcanoes** (EONET `volcanoes` category).
+  Split into wildfires / volcanoes / storms.
+- **Unbounded feeds**: OpenSky returns ~7 000 states and EONET returns large
+  payloads — now trimmed server-side and capped per layer for frame-rate safety.
+- Next.js upgraded 15.5.2 → 15.5.28 (CVE-2025-66478).
+- PWA manifest pointed at `icon-192.png` / `icon-512.png`, which did not exist.
+  Replaced with real SVG icons.
+- Service worker cached `/api/*` responses — live positions could be served
+  stale. Now network-only for feeds and navigations.
 
 ---
 
-## 🚀 Getting Started (Resume Guide)
+## Verified
 
-### Prerequisites
-- Node.js 20+
-- npm or yarn
-- GitHub account
+- `npx tsc --noEmit` clean; `npm run build` succeeds (13 API routes + page).
+- All 13 API routes return well-formed envelopes, including the error paths.
+- All 7 GLSL shaders parse (validated with `@shaderfrog/glsl-parser`).
+- Console renders server-side; dev server compiles clean.
 
-### Quick Start
+### Not verified here
 
-```bash
-# 1. Clone repository
-git clone https://github.com/hitspyhack/osint-globe-dashboard.git
-cd osint-globe-dashboard
+The sandbox this was built in has network access to GitHub/npm only, so no
+upstream feed could be reached from the server and no browser was available:
 
-# 2. Install dependencies
-npm install
+- live feed payloads have not been exercised against real responses end-to-end
+- tile servers could not be probed from the sandbox (the app probes them from
+  the browser at runtime)
+- post-processing output has not been inspected visually
 
-# 3. Configure environment variables
-cp .env.example .env.local
-
-# Edit .env.local and add:
-# WINDY_WEBCAMS_API_KEY=your_key_here
-# OPENSKY_USERNAME=your_username
-# OPENSKY_PASSWORD=your_password
-# SPIRE_API_KEY=your_key (optional, for AIS)
-# MARINETRAFFIC_API_KEY=your_key (optional)
-
-# 4. Run development server
-npm run dev
-
-# 5. Open browser
-# http://localhost:3000
-```
-
-### Build for Production
-
-```bash
-# Build
-npm run build
-
-# Start production server
-npm start
-
-# Or deploy to Vercel
-vercel --prod
-
-# Or deploy to Netlify
-netlify deploy --prod --dir=.next
-```
+Feed shapes were written against the providers' documented schemas and every
+call site is guarded, but first run should be treated as a smoke test.
 
 ---
 
-## 🔑 API Keys Required
+## Known limitations
 
-| Service | Key | Get From | Status |
-|---------|-----|----------|--------|
-| Windy Webcams | `WINDY_WEBCAMS_API_KEY` | [Windy API](https://www.windy.com/-Webcams-api-webcams-api) | Required for webcams |
-| OpenSky | `OPENSKY_USERNAME`, `OPENSKY_PASSWORD` | [OpenSky](https://opensky-network.org/apidoc) | Required for aviation |
-| Spire Maritime | `SPIRE_API_KEY` | [Spire](https://spire.com/maritime/) | Optional (AIS layer) |
-| MarineTraffic | `MARINETRAFFIC_API_KEY` | [MarineTraffic](https://www.marinetraffic.com/en/data/apis) | Optional (AIS layer) |
-
-**No key required:**
-- ISS (Open Notify - free)
-- Earthquakes/Wildfires (NASA EONET - free)
-- Satellites (CelesTrak - free)
-- Geocoding (Nominatim - free, rate limited)
-
----
-
-## 📊 Layer Status
-
-| Layer | Status | Update Frequency | Auth Required |
-|-------|--------|------------------|---------------|
-| ISS | ✅ Live | 5 seconds | No |
-| Earthquakes | ✅ Live | On load | No |
-| Wildfires | ✅ Live | On load | No |
-| Webcams | ✅ Live | On load | Windy key |
-| Maritime (AIS) | ⚠️ Adapter | 30 seconds | Licensed provider |
-| Aviation (ADS-B) | ✅ Live | 30 seconds | OpenSky account |
-| Satellites (TLE) | ✅ Propagated | Real-time | No |
-| Search | ✅ Live | On type | No |
-| Timeline | ✅ Historical | Variable | No |
+- **Vessels need a key.** There is no reliable keyless global AIS feed; the
+  layer stays dark until an AISHub / Spire / Datalastic / MarineTraffic key is
+  added.
+- **Point merging trade-off.** Points are individual meshes so they stay
+  clickable. "Merge points" in OPTICS trades clicking for speed on huge feeds.
+- **OpenSky anonymous access** is heavily rate-limited; the route falls back to
+  an adsb.lol regional query. Add OpenSky credentials for reliable global traffic.
+- **Overpass layers** (cameras, installations) are slow by nature — off by
+  default, cached 1h/12h on the proxy.
+- **No Cesium-style 3D terrain or photorealistic 3D tiles.** That needs a Google
+  Maps or Cesium ion key and a different renderer.
 
 ---
 
-## 🐛 Troubleshooting
+## Backlog
 
-### Common Issues
+**High**
+1. Smoke-test every layer against live responses; fix shape drift.
+2. 3D aircraft/ship models oriented by heading via `objectsData`.
+3. Submarine cable + datacenter / critical-infrastructure datasets.
+4. AI briefing: summarise what is currently in view (OpenAI key, optional).
 
-**"window is not defined"**
-- ✅ Fixed: Dynamic imports for globe.gl
+**Medium**
+5. Track trails: persist recent positions per entity and draw fading paths.
+6. Region alerts: notify when new M5+ quakes or military traffic enter view.
+7. Saved views / bookmarks with named shareable links.
+8. Heatmap mode for quake and fire density.
+9. Convoy/vessel dwell detection, gap analysis for AIS.
 
-**"Globe(...).globeEl is not a function"**
-- ✅ Fixed: Using `import("globe.gl").default`
-
-**"Cannot set properties of undefined (setting 'innerHTML')"**
-- ✅ Fixed: `requestAnimationFrame` after DOM paint
-
-**"Cannot set properties of undefined (setting 'autoRotate')"**
-- ✅ Fixed: Null checks before `instance.controls()`
-
-**"satrec is not a function"**
-- ✅ Fixed: Using `Satrec.create()` for satellite.js v5
-
-**"e is not defined" in parseEvents**
-- ✅ Fixed: Using `eventTitle` property pattern
+**Low**
+10. Light HUD theme for daytime basemaps.
+11. Voice control ("fly to Taipei", "show me military flights").
+12. Unit tests for the parsers in `lib/sources.ts`.
 
 ---
 
-## 🎯 Next Steps (Backlog)
-
-### High Priority
-1. [ ] Test all layers with real API keys
-2. [ ] Deploy to Vercel/Netlify
-3. [ ] Test PWA installation on iOS/Android
-4. [ ] Add webcam clustering for performance
-5. [ ] Integrate real AIS provider (Spire or MarineTraffic)
-
-### Medium Priority
-6. [ ] Add TLE propagation for real-time satellite positions
-7. [ ] Implement heatmap for earthquake/wildfire density
-8. [ ] Add country/region filters
-9. [ ] Add timeline historical data for all layers
-10. [ ] Add export/screenshot functionality
-
-### Low Priority
-11. [ ] Add more satellite catalogs (military, GPS, etc.)
-12. [ ] Integrate weather layers (wind, clouds, precipitation)
-13. [ ] Add user bookmarks/favorites system
-14. [ ] Add shareable URLs with state
-15. [ ] Add dark/light theme toggle
-
----
-
-## 📝 Development Notes
-
-### Key Decisions
-
-1. **Dynamic Imports** - `globe.gl` and `satellite.js` must be client-side only
-2. **Request Animation Frame** - Ensures DOM is painted before globe initialization
-3. **Fallback Positions** - ISS uses approximate orbit if API fails
-4. **Adapter Pattern** - AIS providers can be swapped without code changes
-5. **TypeScript Strict** - All types defined in `types/index.ts`
-
-### Code Style
-
-- Functional components with hooks
-- TypeScript strict mode
-- ESLint + Prettier (to be added)
-- Error boundaries for graceful degradation
-- Console warnings (not errors) for expected failures
-
----
-
-## 📞 Contact
-
-**Developer:** Ricardo Ferreira  
-**GitHub:** [@hitspyhack](https://github.com/hitspyhack)  
-**Location:** Setúbal, Portugal  
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-**Ready to resume?** Just run:
+## Development
 
 ```bash
 git pull
 npm install
-npm run dev
+npm run dev        # http://localhost:3000
+npm run build      # production build
+npm run typecheck  # tsc --noEmit
 ```
 
-And check this file for context! 🚀
+Adding a layer is three steps: a `LayerDef` in `lib/layers.ts`, a loader +
+normaliser in `lib/sources.ts` (plus an `/api/*` route if it needs caching or a
+key), and a style entry in `components/GlobeView.tsx`. The dock, HUD counters
+and dossier pick it up automatically.

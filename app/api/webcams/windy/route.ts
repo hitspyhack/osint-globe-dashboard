@@ -1,41 +1,58 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
+import { envelope, failure, fetchJson, resolveKeys } from "@/lib/server/upstream";
 
+export const dynamic = "force-dynamic";
+
+/** Windy webcams. Requires a Windy API key (env or POWER UP panel). */
 export async function GET(request: NextRequest) {
-  const key = process.env.WINDY_WEBCAMS_API_KEY;
-  const { searchParams } = new URL(request.url);
-  const bbox = searchParams.get("bbox") || "-180,-85,180,85";
-  const limit = Math.min(Number(searchParams.get("limit")) || 100, 500);
+  const keys = resolveKeys(request);
+  const key = keys.WINDY;
 
   if (!key) {
-    return NextResponse.json({ webcams: [], missingKey: true });
+    return envelope({
+      items: [],
+      count: 0,
+      needsKey: true,
+      error: "Windy API key required",
+      source: "none",
+    });
   }
 
+  const params = request.nextUrl.searchParams;
+  const bbox = params.get("bbox") ?? "-180,-85,180,85";
+  const limit = Math.min(Number.parseInt(params.get("limit") ?? "200", 10) || 200, 500);
+
   try {
-    const response = await fetch(
-      `https://api.windy.com/webcams/api/v3/webcams?bbox=${bbox}&limit=${limit}`,
-      {
-        headers: { "x-windy-api-key": key },
-        next: { revalidate: 300 },
-      }
+    const { data, cached } = await fetchJson<{
+      result?: { webcams?: Array<Record<string, any>> };
+      webcams?: Array<Record<string, any>>;
+    }>(
+      `https://api.windy.com/webcams/api/v3/webcams?bbox=${encodeURIComponent(
+        bbox
+      )}&limit=${limit}`,
+      { ttlSeconds: 600, headers: { "x-windy-api-key": key } }
     );
 
-    if (!response.ok) {
-      return NextResponse.json({ webcams: [], error: "Windy source unavailable" }, { status: 200 });
-    }
+    const list = data.result?.webcams ?? data.webcams ?? [];
+    const items = list
+      .map((cam) => {
+        const lat = Number.parseFloat(cam.location?.latitude ?? cam.latitude);
+        const lng = Number.parseFloat(cam.location?.longitude ?? cam.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
+          id: String(cam.webcamId ?? cam.id ?? `${lat},${lng}`),
+          lat,
+          lng,
+          title: cam.title ?? cam.location?.city ?? "Public camera",
+          imageUrl: cam.image?.current?.preview ?? cam.images?.current?.preview,
+          embedUrl: cam.player?.day?.embed ?? cam.player?.live?.embed,
+          source: "windy",
+        };
+      })
+      .filter((cam): cam is NonNullable<typeof cam> => cam !== null);
 
-    const data = await response.json();
-    const webcams = (data.webcams || data || []).map((cam: any) => ({
-      id: String(cam.webcamId || cam.id),
-      lat: cam.location?.latitude ?? cam.latitude,
-      lng: cam.location?.longitude ?? cam.longitude,
-      title: cam.title || cam.location?.city || "Windy webcam",
-      imageUrl: cam.image?.current?.preview || cam.images?.current?.preview,
-      embedUrl: cam.player?.day?.embed || cam.player?.live?.embed,
-      source: "windy",
-    })).filter((cam: any) => Number.isFinite(cam.lat) && Number.isFinite(cam.lng));
-
-    return NextResponse.json({ webcams });
-  } catch {
-    return NextResponse.json({ webcams: [], error: "Unable to load Windy webcams" }, { status: 200 });
+    return envelope({ items, count: items.length, source: "Windy", cached });
+  } catch (error) {
+    return failure(error instanceof Error ? error.message : "Windy unavailable", true);
   }
 }
