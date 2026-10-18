@@ -171,7 +171,7 @@ select {
 
 .hud-top {
   position: absolute;
-  top: 18px;
+  top: calc(18px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -301,13 +301,13 @@ select {
 }
 
 .console-corner-tl {
-  top: 18px;
-  left: 20px;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  left: calc(20px + env(safe-area-inset-left, 0px));
 }
 
 .console-corner-tr {
-  top: 18px;
-  right: 20px;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  right: calc(20px + env(safe-area-inset-right, 0px));
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: 52vw;
@@ -343,6 +343,26 @@ select {
   width: 26px;
   text-align: center;
   padding: 5px 0;
+}
+
+.native-location-btn {
+  display: inline-flex;
+  width: 34px;
+  min-width: 34px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+}
+
+.native-location-btn svg {
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.native-location-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 /* ---------- search ---------- */
@@ -442,7 +462,7 @@ select {
 
 .sensor-bar {
   position: absolute;
-  bottom: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
@@ -519,13 +539,13 @@ select {
 }
 
 .panel-left {
-  top: 72px;
+  top: calc(72px + env(safe-area-inset-top, 0px));
   left: 20px;
   border-left: 2px solid var(--osint-primary);
 }
 
 .panel-right {
-  top: 72px;
+  top: calc(72px + env(safe-area-inset-top, 0px));
   right: 20px;
   border-right: 2px solid var(--osint-accent);
 }
@@ -1887,7 +1907,7 @@ select {
   }
 
   .console-corner-tr {
-    max-width: 60vw;
+    max-width: 52vw;
   }
 
   .search-bar {
@@ -1948,17 +1968,21 @@ select {
   }
 
   .hud-top {
-    top: 56px;
+    top: calc(56px + env(safe-area-inset-top, 0px));
     gap: 4px;
   }
 
   .console-corner-tl {
-    top: 14px;
-    left: 14px;
+    top: calc(14px + env(safe-area-inset-top, 0px));
+    left: calc(14px + env(safe-area-inset-left, 0px));
+  }
+
+  .console-corner-tr {
+    max-width: 44vw;
   }
 
   .search-bar {
-    width: 160px;
+    width: 120px;
   }
 
   .sensor-chip {

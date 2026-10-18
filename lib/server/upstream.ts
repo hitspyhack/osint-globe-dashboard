@@ -136,6 +136,12 @@ export function envelope<T>(payload: Partial<ApiEnvelope<T>>): NextResponse {
     {
       headers: {
         "cache-control": "no-store",
+        // The bundled Capacitor UI has the secure custom origin capacitor://localhost.
+        "access-control-allow-origin": "capacitor://localhost",
+        "access-control-allow-methods": "GET, OPTIONS",
+        "access-control-allow-headers": "content-type, authorization, x-ogd-keys",
+        "access-control-max-age": "86400",
+        vary: "Origin",
       },
     }
   );
