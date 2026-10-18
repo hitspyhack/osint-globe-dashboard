@@ -18,6 +18,19 @@ interface HudFrameProps {
   live: boolean;
 }
 
+/**
+ * True only after hydration.
+ *
+ * The UTC clock is derived from `Date.now()`, which differs between the
+ * server render and the client render — rendering it before mount is a
+ * guaranteed hydration mismatch.
+ */
+function useMounted(): boolean {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted;
+}
+
 function useTelemetryPulse(intervalMs = 250) {
   const [snapshot, setSnapshot] = useState({ ...telemetry });
 
@@ -51,6 +64,7 @@ export default function HudFrame({
   live,
 }: HudFrameProps) {
   const pulse = useTelemetryPulse();
+  const mounted = useMounted();
   const sensorDef = SENSOR_BY_ID[sensor];
   const map = BASEMAP_BY_ID[basemap];
   const clock = formatUtcClock(simTime);
@@ -84,7 +98,9 @@ export default function HudFrame({
 
         <div className="hud-chip">
           <span className="hud-label">UTC</span>
-          <span className={`hud-value ${live ? "" : "hud-value-live"}`}>{clock}</span>
+          <span className={`hud-value ${live ? "" : "hud-value-live"}`} suppressHydrationWarning>
+            {mounted ? clock : "--:--:--Z"}
+          </span>
           {!live && <span className="hud-tag hud-tag-amber">SIM</span>}
         </div>
 

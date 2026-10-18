@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { BASEMAP_BY_ID, LAYER_BY_ID } from "@/lib/layers";
-import { GLOBE_RADIUS_UNITS, circlePolygon, kmToGlobeUnits, terminatorRing } from "@/lib/geo";
+import {
+  GLOBE_RADIUS_UNITS,
+  circlePolygon,
+  kmToGlobeUnits,
+  pathLengthKm,
+  terminatorRing,
+} from "@/lib/geo";
 import { SENSOR_CHROME, SENSOR_PASSES, SHADER_VERTEX } from "@/lib/sensors";
 import { groundTrack, splitTle } from "@/lib/satellite-propagation";
 import { telemetry } from "@/lib/telemetry";
@@ -113,6 +119,9 @@ interface PointDatum {
 }
 
 type AnyGlobe = any;
+
+/** NORAD id of the ISS, used for its TLE ground track. */
+const ISS_NORAD_ID = "25544";
 
 /* ------------------------------------------------------------------ *
  * Component
@@ -431,29 +440,31 @@ export default function GlobeView({
       color: string | ((t: number) => string);
       altitude: number;
       stroke?: number;
+      /** Per-path dash state. A zero gap disables dashes entirely. */
+      dashLength: number;
+      dashGap: number;
+      animateTime: number;
       name: string;
     }> = [];
 
     // ISS ground track (from TLE when the catalogue is available).
     if (enabledSet.has("iss")) {
-      const iss = satelliteCatalog.get("25544");
+      const iss = satelliteCatalog.get(ISS_NORAD_ID);
       if (iss) {
         list.push({
-          points: groundTrack(
-            { name: iss.name, noradId: iss.noradId, tle: iss.tle },
-            simTime,
-            95,
-            80
-          ),
+          points: groundTrack({ name: iss.name, noradId: iss.noradId, tle: iss.tle }, simTime, 95, 80),
           color: () => "rgba(240,171,252,0.85)",
           altitude: kmToGlobeUnits(420),
           stroke: 0.6,
+          dashLength: 0,
+          dashGap: 0,
+          animateTime: 0,
           name: "iss-track",
         });
       }
     }
 
-    // Selected satellite: one full revolution of ground track.
+    // Selected satellite: one full revolution of ground track, dashed and animated.
     if (selection?.entity.kind === "satellite") {
       const lines = splitTle(String(selection.entity.meta?.TLE ?? ""));
       if (lines) {
@@ -471,6 +482,9 @@ export default function GlobeView({
           color: (t: number) => `rgba(167,139,250,${0.25 + 0.6 * (1 - Math.abs(t - 0.5) * 2)})`,
           altitude: Math.max(0.004, kmToGlobeUnits(selection.entity.altitudeKm ?? 500)),
           stroke: 0.8,
+          dashLength: 0.02,
+          dashGap: 0.012,
+          animateTime: 14_000,
           name: "satellite-track",
         });
       }
@@ -482,11 +496,20 @@ export default function GlobeView({
         color: () => "rgba(253,230,138,0.75)",
         altitude: 0.003,
         stroke: 0.5,
+        dashLength: 0,
+        dashGap: 0,
+        animateTime: 0,
         name: "terminator",
       });
     }
 
-    return list.filter((path) => path.points.length > 1);
+    // three-globe computes dashScale as 1 / lineLength, so a degenerate
+    // (zero-length or NaN) path would poison the fat-line geometry with NaN.
+    return list.filter((path) => {
+      if (path.points.length < 2) return false;
+      const length = pathLengthKm(path.points);
+      return Number.isFinite(length) && length > 1;
+    });
   }, [enabledSet, satelliteCatalog, selection, simTime]);
 
   useEffect(() => {
@@ -502,10 +525,10 @@ export default function GlobeView({
       .pathColor("color")
       .pathStroke("stroke")
       .pathTransitionDuration(0)
-      .pathDashLength(0.02)
-      .pathDashGap(0.012)
-      .pathDashAnimateTime(selection?.entity.kind === "satellite" ? 14_000 : 0);
-  }, [paths, ready, selection]);
+      .pathDashLength("dashLength")
+      .pathDashGap("dashGap")
+      .pathDashAnimateTime("animateTime");
+  }, [paths, ready]);
 
   /* ---------------- polygons: sensor footprint ---------------- */
 

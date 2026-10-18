@@ -183,6 +183,15 @@ export function terminatorRing(date: Date, segments = 180): Array<[number, numbe
   return ring;
 }
 
+/** Total great-circle length of a polyline, in kilometres. */
+export function pathLengthKm(points: Array<{ lat: number; lng: number }>): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    total += haversineKm(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+  }
+  return total;
+}
+
 /** Parse "38.7, -9.1" style input from the search box. */
 export function parseCoords(input: string): { lat: number; lng: number } | null {
   const match = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
