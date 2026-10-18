@@ -83,6 +83,36 @@ call site is guarded, but first run should be treated as a smoke test.
 
 ---
 
+## Fixes from the first browser run
+
+The first real browser session surfaced four runtime errors. Three were real
+bugs, all now fixed:
+
+1. **`object.intersectsFrustum is not a function`** — duplicate Three.js.
+   `three-render-objects` requires peer `three >= 0.179` while the repo pinned
+   `0.170.0`, so npm installed a *second* copy of three under `globe.gl`. The
+   0.186 renderer calls `object.intersectsFrustum()`, which 0.170 objects do
+   not have. Pinned `three` to `0.186.1` and reinstalled with the lockfile
+   removed so the copy dedupes. Verify with `npm ls three --all` — expect one
+   entry at every level.
+2. **`LineSegmentsGeometry.computeBoundingSphere(): Computed radius is NaN`** —
+   three-globe sets `dashScale = 1 / lineLength` for every dashed path, so a
+   zero-length path produces `Infinity` and poisons the fat-line geometry.
+   Dashes are now per-path (only the selected satellite's track is dashed) and
+   paths are filtered on `pathLengthKm(...) > 1` before they reach globe.gl.
+3. **Hydration mismatch on the UTC clock** — the chip rendered `Date.now()`
+   during SSR, so server and client disagreed by a second. The clock now
+   renders `--:--:--Z` until after mount.
+
+The remaining console noise, `Failed to fetch` / `signal timed out` from
+`lib/feeds.ts`, is environmental in the sandbox rather than a code defect:
+the preview has no outbound egress, and the stack trace passes through
+`chrome-extension://…/injectScriptAdjust.js`, i.e. a browser extension
+patching `window.fetch`. Worth re-checking in a clean profile with real
+network access before treating it as a bug.
+
+---
+
 ## Known limitations
 
 - **Vessels need a key.** There is no reliable keyless global AIS feed; the

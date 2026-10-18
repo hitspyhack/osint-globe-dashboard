@@ -175,7 +175,7 @@ export function loadFlights(keys: ApiKeyMap): Promise<{ items: AircraftRecord[];
         parse: (raw) => adsbLolAircraft(raw).slice(0, 2000),
       },
     ],
-    { timeoutMs: 20_000 }
+    { timeoutMs: 25_000 }
   );
 }
 
