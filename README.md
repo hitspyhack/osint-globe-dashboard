@@ -6,7 +6,8 @@ cameras, broadcast radio and launch pads — rendered with sensor looks and a
 tactical HUD.
 
 Built with **Next.js 15**, **React 19**, **globe.gl / three.js** and **satellite.js**
-(SGP4). No API key is required to boot: nine layers work out of the box.
+(SGP4). No API key is required. Every launch starts with feeds off and offers
+four random layer choices before any live data is requested.
 
 > The HUD, sensor-look and console UX are inspired by
 > [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) (MIT, by
@@ -49,8 +50,10 @@ npm run build && npm start
 | 🚀 Launch Schedule | Upcoming orbital launches with pads, windows and countdown | Launch Library 2 | 🟢 |
 | 🏭 Installations | Airfields, ports, military areas, nuclear plants | OpenStreetMap (Overpass) | 🟢 |
 | 🧭 Graticule / 🌗 Day-Night | 10° grid and a computed sun terminator | generated | 🟢 |
+| 🏔 Elevation / Terrain | Global Terrarium RGB DEM, color relief and displaced land mesh; adjustable from 1× to 100× | AWS Open Data · Terrarium tiles | 🟢 |
 
-🟢 works with no key · 🟡 unlocks or upgrades with a key
+🟢 works with no key · 🟡 unlocks or upgrades with a key. Terrain is an opt-in
+visual layer in OPTICS rather than a live OSINT feed.
 
 ---
 
@@ -78,6 +81,20 @@ health readout so an offline upstream is obvious instead of silent.
 served as slippy tiles through three-globe's tile engine with automatic
 fallback if a tile server is unreachable.
 
+**Elevation / terrain** — turn on the public AWS Terrarium RGB elevation tiles
+in OPTICS to build a global 3D relief mesh. Land height can be exaggerated from
+true scale to **100×**; the color ramp also communicates ocean depth. The global
+overview uses zoom-3 tiles (roughly 20 km/pixel at the equator), loaded only
+when requested, and reports source/CORS failures in the panel.
+
+**Universe reference** — a procedural deep-space starfield surrounds the globe.
+A compact heliocentric inset uses the current simulation date to show Earth's
+approximate eccentric orbit, distance and orbital speed. The globe's solar
+lighting follows the computed subsolar point; the distant star reference turns
+at Earth's sidereal rate (23h 56m) while the geographic globe stays stable.
+The orbit inset is an ephemeris illustration, not a navigation-grade planetary
+solution.
+
 **Target dossier** — click any track for its full record (callsign, MMSI, NORAD
 ID, magnitude, depth, footprint, TLE…), plus centre/copy coordinates,
 OpenStreetMap and Street View links, inline camera feeds and live radio audio.
@@ -97,7 +114,7 @@ offline shell.
 |---|---|---|---|
 | `1`–`8` | sensor look | `L` | layer dock |
 | `/` | focus search | `T` | mission clock |
-| `R` | auto-rotate | `P` | screenshot |
+| `R` | Earth sidereal spin | `P` | screenshot |
 | `+` / `-` | zoom | `?` | help |
 | `Esc` | clear selection / close panels | | |
 

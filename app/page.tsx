@@ -10,7 +10,9 @@ import PowerUp from "@/components/PowerUp";
 import SearchBar from "@/components/SearchBar";
 import SensorBar from "@/components/SensorBar";
 import SettingsPanel from "@/components/SettingsPanel";
+import StartupLayerPicker from "@/components/StartupLayerPicker";
 import TimelineBar from "@/components/TimelineBar";
+import UniverseWidget from "@/components/UniverseWidget";
 import { useGlobeData } from "@/hooks/useGlobeData";
 import { registerServiceWorker } from "@/lib/registerServiceWorker";
 import { boundsFromPov } from "@/lib/geo";
@@ -23,6 +25,7 @@ import type {
   Entity,
   LayerId,
   Pov,
+  ElevationStatus,
   Selection,
   SensorId,
 } from "@/types";
@@ -36,7 +39,7 @@ const GlobeView = dynamic(() => import("@/components/GlobeView"), {
   ),
 });
 
-const CONSOLE_STORAGE = "osint-globe.console.v1";
+const CONSOLE_STORAGE = "osint-globe.console.v2";
 
 interface ConsoleState {
   enabled: LayerId[];
@@ -44,6 +47,8 @@ interface ConsoleState {
   basemap: BasemapId;
   autoRotate: boolean;
   mergePoints: boolean;
+  elevationEnabled: boolean;
+  elevationExaggeration: number;
 }
 
 const DEFAULT_STATE: ConsoleState = {
@@ -52,10 +57,21 @@ const DEFAULT_STATE: ConsoleState = {
   basemap: "satellite",
   autoRotate: true,
   mergePoints: false,
+  elevationEnabled: false,
+  elevationExaggeration: 30,
 };
 
 function isLayerId(value: string): value is LayerId {
   return LAYERS.some((layer) => layer.id === value);
+}
+
+function pickRandomLayerIds(): LayerId[] {
+  const pool = LAYERS.filter((layer) => layer.group !== "overlay").map((layer) => layer.id);
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[swap]] = [pool[swap], pool[index]];
+  }
+  return pool.slice(0, 4);
 }
 
 export default function ConsolePage() {
@@ -72,6 +88,10 @@ export default function ConsolePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showPowerUp, setShowPowerUp] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showStartupPicker, setShowStartupPicker] = useState(false);
+  const [startupChoices, setStartupChoices] = useState<LayerId[]>([]);
+  const [sharedLayers, setSharedLayers] = useState<LayerId[]>([]);
+  const [elevationStatus, setElevationStatus] = useState<ElevationStatus>({ phase: "off", progress: 0 });
   const [toast, setToast] = useState<string | null>(null);
 
   const apiRef = useRef<GlobeApi | null>(null);
@@ -104,9 +124,12 @@ export default function ConsolePage() {
         setState((prev) => ({
           ...prev,
           ...parsed,
-          enabled: Array.isArray(parsed.enabled)
-            ? parsed.enabled.filter(isLayerId)
-            : prev.enabled,
+          // A new session is deliberately clean: no feeds or terrain start on.
+          enabled: [],
+          elevationEnabled: false,
+          elevationExaggeration: Number.isFinite(parsed.elevationExaggeration)
+            ? Math.min(100, Math.max(1, Number(parsed.elevationExaggeration)))
+            : prev.elevationExaggeration,
         }));
       }
     } catch {
@@ -115,7 +138,8 @@ export default function ConsolePage() {
 
     setKeys(loadKeys());
 
-    // Shared links: #lat,lng,altitude,sensor,basemap,layerIds
+    // Shared links restore camera/optics immediately, but feeds stay off until
+    // the user confirms a choice in the startup prompt.
     const hash = window.location.hash.replace(/^#/, "");
     if (hash) {
       const [coords, sensorPart, basemapPart, layersPart] = hash.split("/");
@@ -123,15 +147,18 @@ export default function ConsolePage() {
       if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(altitude)) {
         setPov({ lat, lng, altitude });
       }
+      if (layersPart) setSharedLayers(layersPart.split(",").filter(isLayerId));
       setState((prev) => ({
         ...prev,
         sensor: (SENSORS.find((item) => item.id === sensorPart)?.id ?? prev.sensor) as SensorId,
         basemap: (BASEMAPS.find((item) => item.id === basemapPart)?.id ?? prev.basemap) as BasemapId,
-        enabled: layersPart
-          ? (layersPart.split(",").filter(isLayerId) as LayerId[])
-          : prev.enabled,
+        enabled: [],
+        elevationEnabled: false,
       }));
     }
+
+    setStartupChoices(pickRandomLayerIds());
+    setShowStartupPicker(true);
   }, []);
 
   useEffect(() => {
@@ -180,6 +207,27 @@ export default function ConsolePage() {
       ...prev,
       enabled: prev.enabled.length === 1 && prev.enabled[0] === id ? DEFAULT_ENABLED : [id],
     }));
+  }, []);
+
+  const startWithLayers = useCallback((layers: LayerId[]) => {
+    setState((prev) => ({ ...prev, enabled: layers, elevationEnabled: false }));
+    setShowStartupPicker(false);
+    setShowLayers(true);
+  }, []);
+
+  const continueWithEmptyGlobe = useCallback(() => {
+    setState((prev) => ({ ...prev, enabled: [], elevationEnabled: false }));
+    setShowStartupPicker(false);
+    setShowLayers(true);
+  }, []);
+
+  const restoreSharedLayers = useCallback(() => {
+    if (sharedLayers.length > 0) startWithLayers(sharedLayers);
+  }, [sharedLayers, startWithLayers]);
+
+  const toggleElevation = useCallback((enabled: boolean) => {
+    setState((prev) => ({ ...prev, elevationEnabled: enabled }));
+    if (!enabled) setElevationStatus({ phase: "off", progress: 0 });
   }, []);
 
   const flyTo = useCallback((lat: number, lng: number, altitude = 0.6) => {
@@ -319,6 +367,9 @@ export default function ConsolePage() {
         sensor={state.sensor}
         autoRotate={state.autoRotate}
         mergePoints={state.mergePoints}
+        elevationEnabled={state.elevationEnabled}
+        elevationExaggeration={state.elevationExaggeration}
+        onElevationStatus={setElevationStatus}
         simTime={simTime}
         selection={selection}
         satelliteCatalog={satelliteCatalog}
@@ -337,6 +388,8 @@ export default function ConsolePage() {
         simTime={simTime}
         live={live}
       />
+
+      {!selectedEntity && <UniverseWidget date={simTime} />}
 
       {/* Top-left: search */}
       <div className="console-corner console-corner-tl">
@@ -420,6 +473,13 @@ export default function ConsolePage() {
           onAutoRotate={(autoRotate) => setState((prev) => ({ ...prev, autoRotate }))}
           mergePoints={state.mergePoints}
           onMergePoints={(mergePoints) => setState((prev) => ({ ...prev, mergePoints }))}
+          elevationEnabled={state.elevationEnabled}
+          onElevationEnabled={toggleElevation}
+          elevationExaggeration={state.elevationExaggeration}
+          onElevationExaggeration={(elevationExaggeration) =>
+            setState((prev) => ({ ...prev, elevationExaggeration: Math.min(100, Math.max(1, elevationExaggeration)) }))
+          }
+          elevationStatus={elevationStatus}
           onShare={share}
           onScreenshot={screenshot}
           onClose={() => setShowSettings(false)}
@@ -441,6 +501,17 @@ export default function ConsolePage() {
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {showStartupPicker && startupChoices.length === 4 && (
+        <StartupLayerPicker
+          choices={startupChoices}
+          onReroll={() => setStartupChoices(pickRandomLayerIds())}
+          onStart={startWithLayers}
+          onContinueEmpty={continueWithEmptyGlobe}
+          sharedLayers={sharedLayers}
+          onRestoreShared={restoreSharedLayers}
+        />
+      )}
     </main>
   );
 }

@@ -31,6 +31,15 @@ be filtered, inspected and time-scrubbed.
 - **POWER UP** — in-app key panel (localStorage → our API routes only).
 - **Console ops** — location search (`/`), solo/refresh per layer, screenshot
   (`P`), shareable view links, help (`?`), persisted preferences.
+- **Clean startup** — every session starts with all feeds and terrain off; the
+  user can activate one or more of four randomly sampled feed choices (or keep
+  the globe empty). Shared links can be restored explicitly from that prompt.
+- **Global elevation** — optional AWS Terrarium DEM sampling builds a 3D
+  hypsometric relief mesh, with a 1×–100× exaggeration control and load/error
+  feedback. The current global overview samples zoom-3 tiles.
+- **Universe reference** — procedural distant stars, a live approximate
+  heliocentric Earth-orbit inset, solar-position lighting, and an inertial sky
+  that counter-rotates at the sidereal rate while keeping the map Earth-fixed.
 
 ### Fixed
 
@@ -74,9 +83,10 @@ The sandbox this was built in has network access to GitHub/npm only, so no
 upstream feed could be reached from the server and no browser was available:
 
 - live feed payloads have not been exercised against real responses end-to-end
-- tile servers could not be probed from the sandbox (the app probes them from
-  the browser at runtime)
-- post-processing output has not been inspected visually
+- imagery and Terrarium DEM tile CORS/availability could not be probed from
+  the sandbox (the app loads them from the browser at runtime)
+- terrain displacement and post-processing output have not been inspected
+  visually
 
 Feed shapes were written against the providers' documented schemas and every
 call site is guarded, but first run should be treated as a smoke test.
@@ -124,8 +134,10 @@ network access before treating it as a bug.
   an adsb.lol regional query. Add OpenSky credentials for reliable global traffic.
 - **Overpass layers** (cameras, installations) are slow by nature — off by
   default, cached 1h/12h on the proxy.
-- **No Cesium-style 3D terrain or photorealistic 3D tiles.** That needs a Google
-  Maps or Cesium ion key and a different renderer.
+- **Elevation is a global overview, not city-scale terrain.** The opt-in
+  Terrarium DEM samples zoom-3 coverage (~20 km/pixel at the equator); fine
+  local relief and photorealistic 3D buildings still need higher-zoom terrain
+  tiles or a different renderer.
 
 ---
 

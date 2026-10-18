@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { BASEMAP_BY_ID, LAYER_BY_ID } from "@/lib/layers";
+import { earthRotationAngle, SIDEREAL_AUTO_ROTATE_SPEED } from "@/lib/astronomy";
+import { loadGlobalTerrainGrid, type GlobalTerrainGrid } from "@/lib/elevation";
 import {
   GLOBE_RADIUS_UNITS,
   circlePolygon,
   kmToGlobeUnits,
   pathLengthKm,
+  subsolarPoint,
   terminatorRing,
 } from "@/lib/geo";
 import { SENSOR_CHROME, SENSOR_PASSES, SHADER_VERTEX } from "@/lib/sensors";
@@ -18,6 +21,7 @@ import type {
   BasemapId,
   Entity,
   EntityKind,
+  ElevationStatus,
   LayerId,
   Pov,
   Selection,
@@ -99,6 +103,9 @@ export interface GlobeViewProps {
   autoRotate: boolean;
   /** Merge all points into one mesh: far faster, but no hover/click. */
   mergePoints: boolean;
+  elevationEnabled: boolean;
+  elevationExaggeration: number;
+  onElevationStatus: (status: ElevationStatus) => void;
   simTime: Date;
   selection: Selection | null;
   satelliteCatalog: Map<string, SatelliteRecord>;
@@ -134,6 +141,9 @@ export default function GlobeView({
   sensor,
   autoRotate,
   mergePoints,
+  elevationEnabled,
+  elevationExaggeration,
+  onElevationStatus,
   simTime,
   selection,
   satelliteCatalog,
@@ -146,6 +156,11 @@ export default function GlobeView({
   const globeRef = useRef<AnyGlobe | null>(null);
   const tileTargetRef = useRef<AnyGlobe | null>(null);
   const passesRef = useRef<any[]>([]);
+  const starFieldRef = useRef<THREE.Group | null>(null);
+  const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const terrainMeshRef = useRef<THREE.Mesh | null>(null);
+  const elevationExaggerationRef = useRef(elevationExaggeration);
+  elevationExaggerationRef.current = elevationExaggeration;
   const lastPointClickRef = useRef(0);
   const frameRef = useRef(0);
   const [ready, setReady] = useState(false);
@@ -206,23 +221,32 @@ export default function GlobeView({
 
             const controls = instance.controls();
             if (controls) {
-              controls.autoRotate = autoRotate;
-              controls.autoRotateSpeed = 0.28;
+              // Keep the camera in the Earth-fixed frame; the inertial sky rotates
+              // around the globe at the computed sidereal rate below.
+              controls.autoRotate = false;
+              controls.autoRotateSpeed = SIDEREAL_AUTO_ROTATE_SPEED;
               controls.enableDamping = true;
               controls.dampingFactor = 0.12;
               controls.minDistance = 101.5;
               controls.maxDistance = 900;
             }
 
-            // Directional light gives satellite imagery a terminator of its own.
+            // Directional sunlight is re-aimed from the computed subsolar point.
             const light = instance.lights().find((item: any) => item.type === "DirectionalLight");
-            if (light) light.intensity = 1.6;
+            if (light) {
+              light.intensity = 1.6;
+              sunLightRef.current = light as THREE.DirectionalLight;
+            }
 
             globeRef.current = instance;
 
+            // Procedural stars provide an inertial deep-space reference behind Earth.
+            const scene = instance.scene();
+            starFieldRef.current = createStarField();
+            scene.add(starFieldRef.current);
+
             // The tile engine lives on the inner ThreeGlobe object, which
             // globe.gl does not expose — find it by capability.
-            const scene = instance.scene();
             tileTargetRef.current =
               scene.children.find((child: any) => typeof child.updatePov === "function") ?? null;
 
@@ -245,6 +269,24 @@ export default function GlobeView({
       cancelled = true;
       cancelAnimationFrame(animationFrame);
       cancelAnimationFrame(frameRef.current);
+      const scene = globeRef.current?.scene();
+      if (terrainMeshRef.current) {
+        scene?.remove(terrainMeshRef.current);
+        terrainMeshRef.current.geometry.dispose();
+        (terrainMeshRef.current.material as THREE.Material).dispose();
+        terrainMeshRef.current = null;
+      }
+      if (starFieldRef.current) {
+        scene?.remove(starFieldRef.current);
+        starFieldRef.current.traverse((object) => {
+          if (!(object instanceof THREE.Points)) return;
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material.dispose());
+        });
+        starFieldRef.current = null;
+      }
+      sunLightRef.current = null;
       try {
         globeRef.current?._destructor?.();
       } catch {
@@ -355,6 +397,82 @@ export default function GlobeView({
       cancelled = true;
     };
   }, [basemap, ready]);
+
+  /* ---------------- global DEM / relief mesh ---------------- */
+
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!ready || !globe) return;
+
+    if (!elevationEnabled) {
+      if (terrainMeshRef.current) terrainMeshRef.current.visible = false;
+      onElevationStatus({ phase: "off", progress: 0 });
+      return;
+    }
+
+    if (terrainMeshRef.current) {
+      terrainMeshRef.current.visible = true;
+      setTerrainExaggeration(terrainMeshRef.current, elevationExaggerationRef.current);
+      const terrain = terrainMeshRef.current.userData.terrainBounds as { minMeters: number; maxMeters: number };
+      onElevationStatus({
+        phase: "ready",
+        progress: 100,
+        minMeters: terrain.minMeters,
+        maxMeters: terrain.maxMeters,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    onElevationStatus({ phase: "loading", progress: 0 });
+
+    void loadGlobalTerrainGrid(controller.signal, ({ completedTiles, totalTiles }) => {
+      if (cancelled) return;
+      onElevationStatus({
+        phase: "loading",
+        progress: Math.round((completedTiles / totalTiles) * 100),
+      });
+    })
+      .then((grid) => {
+        if (cancelled) return;
+        const mesh = createTerrainMesh(grid, elevationExaggerationRef.current);
+        mesh.visible = true;
+        mesh.userData.terrainBounds = { minMeters: grid.minMeters, maxMeters: grid.maxMeters };
+        globe.scene().add(mesh);
+        terrainMeshRef.current = mesh;
+        onElevationStatus({
+          phase: "ready",
+          progress: 100,
+          minMeters: grid.minMeters,
+          maxMeters: grid.maxMeters,
+        });
+      })
+      .catch((error: unknown) => {
+        if (cancelled || controller.signal.aborted) return;
+        controller.abort();
+        const message = error instanceof Error ? error.message : String(error);
+        onElevationStatus({ phase: "error", progress: 0, error: message });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [elevationEnabled, onElevationStatus, ready]);
+
+  useEffect(() => {
+    if (terrainMeshRef.current) {
+      setTerrainExaggeration(terrainMeshRef.current, elevationExaggeration);
+    }
+  }, [elevationExaggeration, ready]);
+
+  /* ---------------- live solar illumination ---------------- */
+
+  useEffect(() => {
+    if (!ready || !sunLightRef.current) return;
+    aimSunlight(sunLightRef.current, simTime);
+  }, [ready, simTime]);
 
   /* ---------------- points ---------------- */
 
@@ -727,14 +845,15 @@ export default function GlobeView({
     };
   }, [sensor, ready]);
 
-  /* ---------------- auto-rotate ---------------- */
+  /* ---------------- true sidereal Earth / inertial-sky rotation -------- */
 
   useEffect(() => {
-    const globe = globeRef.current;
-    if (!ready || !globe) return;
-    const controls = globe.controls();
-    if (controls) controls.autoRotate = autoRotate;
-  }, [autoRotate, ready]);
+    if (!ready || !autoRotate || !starFieldRef.current) return;
+    const siderealAngle = (earthRotationAngle(simTime) * Math.PI) / 180;
+    // Earth is held in the geographic frame; counter-rotate the distant sky to
+    // show the same physical motion against an inertial stellar background.
+    starFieldRef.current.rotation.y = -siderealAngle;
+  }, [autoRotate, ready, simTime]);
 
   /* ---------------- telemetry + tile engine POV updates ---------------- */
 
@@ -916,6 +1035,222 @@ export default function GlobeView({
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
+
+function createStarField(): THREE.Group {
+  const group = new THREE.Group();
+  const random = seededRandom(0x41524e41);
+  const galacticNormal = new THREE.Vector3(0.48, 0.7, 0.53).normalize();
+  const basisA = new THREE.Vector3().crossVectors(galacticNormal, new THREE.Vector3(0, 1, 0)).normalize();
+  const basisB = new THREE.Vector3().crossVectors(galacticNormal, basisA).normalize();
+
+  const makeLayer = (count: number, size: number, seedOffset: number) => {
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const layerRandom = seededRandom(0x41524e41 + seedOffset);
+    const warm = new THREE.Color("#ffe3bd");
+    const cool = new THREE.Color("#b9d7ff");
+    const neutral = new THREE.Color("#f8fafc");
+
+    for (let index = 0; index < count; index += 1) {
+      let direction: THREE.Vector3;
+      if (layerRandom() < 0.36) {
+        const angle = layerRandom() * Math.PI * 2;
+        const bandOffset = (layerRandom() - 0.5) * 0.22;
+        direction = basisA
+          .clone()
+          .multiplyScalar(Math.cos(angle) * Math.cos(bandOffset))
+          .addScaledVector(basisB, Math.sin(angle) * Math.cos(bandOffset))
+          .addScaledVector(galacticNormal, Math.sin(bandOffset));
+      } else {
+        const y = layerRandom() * 2 - 1;
+        const angle = layerRandom() * Math.PI * 2;
+        const horizontal = Math.sqrt(1 - y * y);
+        direction = new THREE.Vector3(horizontal * Math.cos(angle), y, horizontal * Math.sin(angle));
+      }
+
+      // Far enough from the camera to behave like a celestial background, not a nearby shell.
+      const radius = 78_000 + layerRandom() * 6_000;
+      const offset = index * 3;
+      positions[offset] = direction.x * radius;
+      positions[offset + 1] = direction.y * radius;
+      positions[offset + 2] = direction.z * radius;
+
+      const tint = layerRandom() < 0.18 ? warm : layerRandom() < 0.42 ? cool : neutral;
+      const brightness = 0.36 + layerRandom() * 0.64;
+      colors[offset] = tint.r * brightness;
+      colors[offset + 1] = tint.g * brightness;
+      colors[offset + 2] = tint.b * brightness;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({
+      size,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.84,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    group.add(new THREE.Points(geometry, material));
+  };
+
+  makeLayer(3600, 1.15, 1);
+  makeLayer(220, 1.9, 2);
+  group.name = "procedural-inertial-starfield";
+  return group;
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+function createTerrainMesh(grid: GlobalTerrainGrid, initialExaggeration: number): THREE.Mesh {
+  const { longitudeSegments, latitudeSegments, heightsMeters } = grid;
+  const columns = longitudeSegments + 1;
+  const rows = latitudeSegments + 1;
+  const positions = new Float32Array(columns * rows * 3);
+  const colors = new Float32Array(columns * rows * 3);
+  const indices = new Uint32Array(longitudeSegments * latitudeSegments * 6);
+  const baseRadius = GLOBE_RADIUS_UNITS + 0.04;
+  let vertex = 0;
+
+  for (let row = 0; row < rows; row += 1) {
+    const latitude = 90 - (row / latitudeSegments) * 180;
+    const phi = (latitude * Math.PI) / 180;
+    const cosLat = Math.cos(phi);
+    const sinLat = Math.sin(phi);
+
+    for (let column = 0; column < columns; column += 1) {
+      const longitude = -180 + (column / longitudeSegments) * 360;
+      const lambda = (longitude * Math.PI) / 180;
+      const offset = vertex * 3;
+      positions[offset] = baseRadius * cosLat * Math.sin(lambda);
+      positions[offset + 1] = baseRadius * sinLat;
+      positions[offset + 2] = baseRadius * cosLat * Math.cos(lambda);
+      setTerrainVertexColor(colors, offset, heightsMeters[vertex]);
+      vertex += 1;
+    }
+  }
+
+  let indexOffset = 0;
+  for (let row = 0; row < latitudeSegments; row += 1) {
+    for (let column = 0; column < longitudeSegments; column += 1) {
+      const northwest = row * columns + column;
+      const northeast = northwest + 1;
+      const southwest = northwest + columns;
+      const southeast = southwest + 1;
+      // The order is outward-facing for the globe's north-up coordinate system.
+      indices[indexOffset++] = northwest;
+      indices[indexOffset++] = southeast;
+      indices[indexOffset++] = northeast;
+      indices[indexOffset++] = northwest;
+      indices[indexOffset++] = southwest;
+      indices[indexOffset++] = southeast;
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute("elevationMeters", new THREE.BufferAttribute(heightsMeters, 1));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+
+  const material = new THREE.MeshPhongMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    shininess: 16,
+    specular: new THREE.Color("#475569"),
+  });
+  material.userData.setTerrainExaggeration = (value: number) => {
+    material.userData.currentExaggeration = value;
+    const shader = material.userData.terrainShader as
+      | { uniforms: Record<string, { value: number }> }
+      | undefined;
+    if (shader?.uniforms.uTerrainExaggeration) {
+      shader.uniforms.uTerrainExaggeration.value = value;
+    }
+  };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTerrainExaggeration = {
+      value: material.userData.currentExaggeration ?? initialExaggeration,
+    };
+    material.userData.terrainShader = shader;
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <common>",
+      "#include <common>\nattribute float elevationMeters;\nuniform float uTerrainExaggeration;"
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\ntransformed += normalize(transformed) * max(elevationMeters, 0.0) * 0.0000156958 * uTerrainExaggeration;"
+    );
+  };
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = "terrarium-global-elevation";
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 3;
+  mesh.userData.terrainBounds = { minMeters: grid.minMeters, maxMeters: grid.maxMeters };
+  return mesh;
+}
+
+const TERRAIN_COLOR_STOPS = [
+  { height: -11_000, color: new THREE.Color("#103b59") },
+  { height: -4_500, color: new THREE.Color("#17647a") },
+  { height: -300, color: new THREE.Color("#378d83") },
+  { height: 700, color: new THREE.Color("#7caa71") },
+  { height: 2_200, color: new THREE.Color("#c1b96f") },
+  { height: 4_500, color: new THREE.Color("#c78759") },
+  { height: 8_900, color: new THREE.Color("#f4eee0") },
+];
+
+function setTerrainVertexColor(colors: Float32Array, offset: number, elevationMeters: number): void {
+  let lower = TERRAIN_COLOR_STOPS[0];
+  let upper = TERRAIN_COLOR_STOPS[TERRAIN_COLOR_STOPS.length - 1];
+  for (let index = 1; index < TERRAIN_COLOR_STOPS.length; index += 1) {
+    if (elevationMeters <= TERRAIN_COLOR_STOPS[index].height) {
+      lower = TERRAIN_COLOR_STOPS[index - 1];
+      upper = TERRAIN_COLOR_STOPS[index];
+      break;
+    }
+  }
+  const span = Math.max(1, upper.height - lower.height);
+  const t = Math.max(0, Math.min(1, (elevationMeters - lower.height) / span));
+  colors[offset] = lower.color.r + (upper.color.r - lower.color.r) * t;
+  colors[offset + 1] = lower.color.g + (upper.color.g - lower.color.g) * t;
+  colors[offset + 2] = lower.color.b + (upper.color.b - lower.color.b) * t;
+}
+
+function setTerrainExaggeration(mesh: THREE.Mesh, value: number): void {
+  const material = mesh.material as THREE.MeshPhongMaterial;
+  const setter = material.userData.setTerrainExaggeration as ((scale: number) => void) | undefined;
+  setter?.(value);
+}
+
+function aimSunlight(light: THREE.DirectionalLight, date: Date): void {
+  const sun = subsolarPoint(date);
+  const latitude = (sun.lat * Math.PI) / 180;
+  const longitude = (sun.lng * Math.PI) / 180;
+  const radius = 600;
+  light.position.set(
+    radius * Math.cos(latitude) * Math.sin(longitude),
+    radius * Math.sin(latitude),
+    radius * Math.cos(latitude) * Math.cos(longitude)
+  );
+  light.target.position.set(0, 0, 0);
+  light.target.updateMatrixWorld();
+}
 
 function labelFor(entity: Entity): string {
   const lines = [`<b>${escapeHtml(entity.label)}</b>`];

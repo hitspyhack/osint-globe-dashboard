@@ -186,8 +186,8 @@ export const LAYER_BY_ID: Record<LayerId, LayerDef> = LAYERS.reduce(
   {} as Record<LayerId, LayerDef>
 );
 
-/** Layers that are on the first time the console boots. */
-export const DEFAULT_ENABLED: LayerId[] = LAYERS.filter((l) => !l.defaultOff).map((l) => l.id);
+/** A clean launch leaves every OSINT feed disabled until the user picks layers. */
+export const DEFAULT_ENABLED: LayerId[] = [];
 
 export const GROUP_LABELS: Record<string, string> = {
   air: "AIR",
