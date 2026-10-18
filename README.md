@@ -102,8 +102,9 @@ OpenStreetMap and Street View links, inline camera feeds and live radio audio.
 **Mission clock** — scrub the last 30 days; satellite positions are
 re-propagated and USGS/EONET windows follow the pinned time.
 
-**Extras** — location search (`/`), solo/refresh per layer, PNG screenshot
-(`P`), shareable view links, keyboard-only operation (`?` for help), PWA
+**Extras** — geocoded location search (`/`), on-demand device-location
+centering, solo/refresh per layer, PNG screenshot (`P`), shareable view links
+(and the native iOS share sheet), keyboard-only operation (`?` for help), PWA
 offline shell.
 
 ---
@@ -166,6 +167,87 @@ and the dossier are source-agnostic.
 **Resilience.** Every feed fails independently: a dead upstream marks its layer
 in the dock and leaves a visible status, never a blank globe. Basemaps probe
 their tile server and fall back to the next template, then to a static texture.
+
+---
+
+## iOS / TestFlight (Capacitor)
+
+The iOS app bundles the static client in the native app; it does **not** load
+production UI from a remote `server.url`. The Next.js API routes remain hosted
+on your HTTPS deployment. This keeps the app usable offline at launch and lets
+Apple review a self-contained client while feeds continue to use the backend.
+
+### 1. Deploy the web/API service
+
+Deploy this Next.js project to an HTTPS origin that serves both the web app and
+its `/api/*` routes (for example, `https://globe.example.com`). Deploy the
+current repository version: it adds CORS headers for `capacitor://localhost`
+and handles the iOS `OPTIONS` preflight, including the `x-ogd-keys` header.
+Configure any server-side provider keys as described in **POWER UP** above.
+
+### 2. Build and sync the native project (macOS)
+
+Install dependencies, then pass the **bare HTTPS origin** of that deployment
+(no `/api` suffix or other path):
+
+```bash
+npm ci
+CAPACITOR_API_URL=https://globe.example.com npm run ios:sync
+```
+
+`ios:sync` makes a temporary copy of the app without the dynamic API routes,
+creates the static `www/` client with the API origin embedded, and adds/syncs
+the checked-in Xcode project (minimum deployment target: iOS 15). Generated
+`www/` and `ios/App/App/public/` assets
+are intentionally git-ignored; rerun the command whenever the frontend changes
+or the API origin changes, before building or archiving in Xcode.
+
+To open the synchronized project:
+
+```bash
+CAPACITOR_API_URL=https://globe.example.com npm run ios:open
+```
+
+`npm run ios:open` syncs first, then opens `ios/App/App.xcodeproj`. For a
+simulator or connected device, select the destination in Xcode; the optional
+`npm run ios:run` command also syncs before building and launching.
+
+### 3. Sign and upload to TestFlight
+
+1. On a Mac, install a current Xcode version and sign in to an Apple Developer
+   account enrolled in the Apple Developer Program.
+2. If `com.hitspyhack.osintglobe` is not a bundle ID you control, choose a
+   unique one and update `appId` in `capacitor.config.ts` and the App target's
+   **Bundle Identifier** under Xcode **Signing & Capabilities**. Keep the
+   values in sync, then run `npm run ios:sync` again.
+3. In Xcode, select the **App** target, choose your **Team**, enable
+   **Automatically manage signing**, and set the marketing version/build
+   number under **General → Identity**. Verify the app icon, launch screen and
+   location permission text on a simulator/device.
+4. Choose **Any iOS Device (arm64)** (or a generic iOS device), then select
+   **Product → Archive**. In Organizer choose **Distribute App → App Store
+   Connect → Upload** and follow the signing prompts.
+5. In App Store Connect, create the app record if needed, wait for processing,
+   then add the uploaded build to a TestFlight internal or external testing
+   group. External testing may require Beta App Review.
+
+### Privacy and release checks
+
+Location is requested only after tapping the location button. The app does
+not persist the location, but the visible map bounds can be sent with
+area-scoped feed requests. A view link intentionally shared by the user can
+include the current globe coordinates. Provider keys entered in **POWER UP**
+are stored in the app's local storage and sent with requests to your hosted
+`/api/*` proxy, which forwards applicable keys to the selected provider.
+Review your deployment's logging/privacy policy, then complete App Store
+Connect's privacy disclosures and provide a privacy-policy URL that matches
+the services and providers you enable.
+
+A signed archive and TestFlight upload require macOS/Xcode and your Apple
+Developer account; they cannot be produced from this Linux development
+workspace. The repository includes the native project and setup steps, but the
+production API origin, signing team and App Store Connect app record must be
+provided/configured by the app owner.
 
 ---
 

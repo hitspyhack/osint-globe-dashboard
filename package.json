@@ -8,9 +8,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ios:sync": "node scripts/sync-ios.mjs",
+    "ios:open": "npm run ios:sync && npx cap open ios",
+    "ios:run": "npm run ios:sync && npx cap run ios"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/geolocation": "^8.2.4",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
     "@tailwindcss/postcss": "^4.0.0",
     "globe.gl": "^2.34.8",
     "next": "^15.5.28",
@@ -21,10 +30,17 @@
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "^8.5.31",
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   }
 }

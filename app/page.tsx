@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dossier from "@/components/Dossier";
 import HelpOverlay from "@/components/HelpOverlay";
@@ -16,6 +17,7 @@ import UniverseWidget from "@/components/UniverseWidget";
 import { useGlobeData } from "@/hooks/useGlobeData";
 import { registerServiceWorker } from "@/lib/registerServiceWorker";
 import { boundsFromPov } from "@/lib/geo";
+import { appOrigin } from "@/lib/api-url";
 import { loadKeys, saveKeys } from "@/lib/keys";
 import { BASEMAPS, DEFAULT_ENABLED, LAYERS, SENSORS } from "@/lib/layers";
 import type { GlobeApi } from "@/components/GlobeView";
@@ -93,6 +95,7 @@ export default function ConsolePage() {
   const [sharedLayers, setSharedLayers] = useState<LayerId[]>([]);
   const [elevationStatus, setElevationStatus] = useState<ElevationStatus>({ phase: "off", progress: 0 });
   const [toast, setToast] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
 
   const apiRef = useRef<GlobeApi | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -115,7 +118,7 @@ export default function ConsolePage() {
   /* ---- boot: restore console state, keys and shared links -------------- */
 
   useEffect(() => {
-    registerServiceWorker();
+    if (!Capacitor.isNativePlatform()) registerServiceWorker();
 
     try {
       const raw = window.localStorage.getItem(CONSOLE_STORAGE);
@@ -159,6 +162,45 @@ export default function ConsolePage() {
 
     setStartupChoices(pickRandomLayerIds());
     setShowStartupPicker(true);
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let startupComplete = false;
+    let disposed = false;
+    let splashModule: typeof import("@capacitor/splash-screen") | null = null;
+    const hideSplash = () => {
+      if (!splashModule || disposed) return;
+      void splashModule.SplashScreen.hide().catch(() => undefined);
+    };
+    const onGlobeReady = () => {
+      startupComplete = true;
+      hideSplash();
+    };
+    const timeout = window.setTimeout(() => {
+      startupComplete = true;
+      hideSplash();
+    }, 15_000);
+
+    window.addEventListener("osint-globe-ready", onGlobeReady);
+    void Promise.all([import("@capacitor/status-bar"), import("@capacitor/splash-screen")])
+      .then(async ([statusBar, splash]) => {
+        if (disposed) return;
+        splashModule = splash;
+        await Promise.allSettled([
+          statusBar.StatusBar.setStyle({ style: statusBar.Style.Dark }),
+          statusBar.StatusBar.setOverlaysWebView({ overlay: true }),
+        ]);
+        if (startupComplete) hideSplash();
+      })
+      .catch((error) => console.warn("Native shell setup failed:", error));
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timeout);
+      window.removeEventListener("osint-globe-ready", onGlobeReady);
+    };
   }, []);
 
   useEffect(() => {
@@ -234,6 +276,56 @@ export default function ConsolePage() {
     apiRef.current?.flyTo(lat, lng, altitude, 2200);
   }, []);
 
+  const handleGlobeReady = useCallback(() => {
+    window.dispatchEvent(new Event("osint-globe-ready"));
+  }, []);
+
+  const locateMe = useCallback(async () => {
+    if (locating) return;
+    setLocating(true);
+
+    try {
+      let latitude: number;
+      let longitude: number;
+
+      if (Capacitor.isNativePlatform()) {
+        const { Geolocation } = await import("@capacitor/geolocation");
+        let permission = await Geolocation.checkPermissions();
+        if (permission.location !== "granted") {
+          permission = await Geolocation.requestPermissions({ permissions: ["location"] });
+        }
+        if (permission.location !== "granted") throw new Error("Location permission was not granted.");
+
+        const position = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: false,
+          timeout: 20_000,
+          maximumAge: 60_000,
+        });
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+      } else {
+        if (!navigator.geolocation) throw new Error("This browser does not provide location services.");
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 20_000,
+            maximumAge: 60_000,
+          });
+        });
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+      }
+
+      flyTo(latitude, longitude, 0.45);
+      notify(`Centered on ${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Location is unavailable.";
+      notify(message.length > 72 ? "Could not get your location" : message);
+    } finally {
+      setLocating(false);
+    }
+  }, [flyTo, locating, notify]);
+
   const screenshot = useCallback(() => {
     const dataUrl = apiRef.current?.screenshot();
     if (!dataUrl) {
@@ -256,13 +348,34 @@ export default function ConsolePage() {
       state.enabled.join(","),
     ].join("/");
 
-    const url = `${window.location.origin}${window.location.pathname}#${hash}`;
+    const url = `${appOrigin()}${window.location.pathname}#${hash}`;
     try {
+      if (Capacitor.isNativePlatform()) {
+        const { Share } = await import("@capacitor/share");
+        await Share.share({
+          title: "OSINT Globe view",
+          text: "Explore this OSINT Globe view",
+          url,
+          dialogTitle: "Share globe view",
+        });
+        notify("Share sheet opened");
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title: "OSINT Globe view", url });
+        notify("View shared");
+        return;
+      }
       await navigator.clipboard.writeText(url);
       notify("View link copied");
     } catch {
-      window.location.hash = hash;
-      notify("View link in address bar");
+      try {
+        await navigator.clipboard.writeText(url);
+        notify("View link copied");
+      } catch {
+        window.location.hash = hash;
+        notify("View link in address bar");
+      }
     }
   }, [notify, state.basemap, state.enabled, state.sensor]);
 
@@ -374,6 +487,7 @@ export default function ConsolePage() {
         selection={selection}
         satelliteCatalog={satelliteCatalog}
         onSelect={setSelection}
+        onReady={handleGlobeReady}
         onPovChange={setPov}
         apiRef={apiRef}
       />
@@ -397,6 +511,19 @@ export default function ConsolePage() {
           inputRef={searchRef}
           onFlyTo={(lat, lng, altitude) => flyTo(lat, lng, altitude ?? 0.35)}
         />
+        <button
+          className="tool-btn native-location-btn"
+          onClick={() => void locateMe()}
+          disabled={locating}
+          title="Center globe on your current location"
+          aria-label="Center globe on your current location"
+        >
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="5.25" />
+            <path d="M10 1.5v3M10 15.5v3M1.5 10h3m11 0h3" />
+            <circle cx="10" cy="10" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
       </div>
 
       {/* Top-right: console buttons */}

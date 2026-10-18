@@ -1,3 +1,4 @@
+import { apiUrl } from "@/lib/api-url";
 import { keysToHeaders } from "@/lib/keys";
 
 export interface FeedCandidate<T> {
@@ -25,6 +26,23 @@ export class FeedError extends Error {
   }
 }
 
+function createRequestSignal(parent: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromParent = () => controller.abort(parent?.reason);
+
+  if (parent?.aborted) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timeout);
+      parent?.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
+
 export interface FeedOptions {
   timeoutMs?: number;
   headers?: Record<string, string>;
@@ -48,11 +66,12 @@ export async function fetchFirst<T>(
   const attempts: string[] = [];
 
   for (const candidate of candidates) {
+    const request = createRequestSignal(signal, timeoutMs);
     try {
-      const response = await fetch(candidate.url, {
+      const response = await fetch(apiUrl(candidate.url), {
         ...candidate.init,
         headers: { ...headers, ...(candidate.init?.headers ?? {}) },
-        signal: signal ?? AbortSignal.timeout(timeoutMs),
+        signal: request.signal,
         cache: "no-store",
       });
 
@@ -74,6 +93,9 @@ export async function fetchFirst<T>(
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       attempts.push(`${candidate.label}: ${reason}`);
+      if (signal?.aborted) break;
+    } finally {
+      request.cleanup();
     }
   }
 
