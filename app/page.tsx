@@ -1,112 +1,446 @@
 "use client";
 
-import { Suspense, lazy, useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Dossier from "@/components/Dossier";
+import HelpOverlay from "@/components/HelpOverlay";
+import HudFrame from "@/components/HudFrame";
+import LayerDock from "@/components/LayerDock";
+import PowerUp from "@/components/PowerUp";
+import SearchBar from "@/components/SearchBar";
+import SensorBar from "@/components/SensorBar";
+import SettingsPanel from "@/components/SettingsPanel";
+import TimelineBar from "@/components/TimelineBar";
+import { useGlobeData } from "@/hooks/useGlobeData";
 import { registerServiceWorker } from "@/lib/registerServiceWorker";
+import { boundsFromPov } from "@/lib/geo";
+import { loadKeys, saveKeys } from "@/lib/keys";
+import { BASEMAPS, DEFAULT_ENABLED, LAYERS, SENSORS } from "@/lib/layers";
+import type { GlobeApi } from "@/components/GlobeView";
+import type {
+  ApiKeyMap,
+  BasemapId,
+  Entity,
+  LayerId,
+  Pov,
+  Selection,
+  SensorId,
+} from "@/types";
 
-const GlobeCanvas = lazy(() => import("@/components/GlobeCanvas"));
-const BottomMenu = lazy(() => import("@/components/BottomMenu"));
-const TimelineScrubber = lazy(() => import("@/components/TimelineScrubber"));
+const GlobeView = dynamic(() => import("@/components/GlobeView"), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 flex items-center justify-center bg-slate-950 text-xs uppercase tracking-[0.4em] text-sky-400">
+      Loading optics…
+    </div>
+  ),
+});
 
-export default function HomePage() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [showSearch, setShowSearch] = useState(false);
+const CONSOLE_STORAGE = "osint-globe.console.v1";
+
+interface ConsoleState {
+  enabled: LayerId[];
+  sensor: SensorId;
+  basemap: BasemapId;
+  autoRotate: boolean;
+  mergePoints: boolean;
+}
+
+const DEFAULT_STATE: ConsoleState = {
+  enabled: DEFAULT_ENABLED,
+  sensor: "standard",
+  basemap: "satellite",
+  autoRotate: true,
+  mergePoints: false,
+};
+
+function isLayerId(value: string): value is LayerId {
+  return LAYERS.some((layer) => layer.id === value);
+}
+
+export default function ConsolePage() {
+  const [state, setState] = useState<ConsoleState>(DEFAULT_STATE);
+  const [keys, setKeys] = useState<ApiKeyMap>({});
+  const [live, setLive] = useState(true);
+  const [simTime, setSimTime] = useState(() => new Date());
+  const [speed, setSpeed] = useState(60);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [pov, setPov] = useState<Pov>({ lat: 24, lng: 6, altitude: 2.4 });
+  const [bbox, setBbox] = useState<string | undefined>(undefined);
+  const [showLayers, setShowLayers] = useState(true);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showPowerUp, setShowPowerUp] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const apiRef = useRef<GlobeApi | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const povRef = useRef<Pov>(pov);
+  povRef.current = pov;
+
+  const { entities, statuses, satelliteCatalog, refresh } = useGlobeData({
+    enabled: state.enabled,
+    keys,
+    simTime,
+    live,
+    bbox,
+  });
+
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast((current) => (current === message ? null : current)), 2600);
+  }, []);
+
+  /* ---- boot: restore console state, keys and shared links -------------- */
 
   useEffect(() => {
     registerServiceWorker();
+
+    try {
+      const raw = window.localStorage.getItem(CONSOLE_STORAGE);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ConsoleState>;
+        setState((prev) => ({
+          ...prev,
+          ...parsed,
+          enabled: Array.isArray(parsed.enabled)
+            ? parsed.enabled.filter(isLayerId)
+            : prev.enabled,
+        }));
+      }
+    } catch {
+      /* ignore malformed storage */
+    }
+
+    setKeys(loadKeys());
+
+    // Shared links: #lat,lng,altitude,sensor,basemap,layerIds
+    const hash = window.location.hash.replace(/^#/, "");
+    if (hash) {
+      const [coords, sensorPart, basemapPart, layersPart] = hash.split("/");
+      const [lat, lng, altitude] = (coords ?? "").split(",").map(Number);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(altitude)) {
+        setPov({ lat, lng, altitude });
+      }
+      setState((prev) => ({
+        ...prev,
+        sensor: (SENSORS.find((item) => item.id === sensorPart)?.id ?? prev.sensor) as SensorId,
+        basemap: (BASEMAPS.find((item) => item.id === basemapPart)?.id ?? prev.basemap) as BasemapId,
+        enabled: layersPart
+          ? (layersPart.split(",").filter(isLayerId) as LayerId[])
+          : prev.enabled,
+      }));
+    }
   }, []);
 
-  const handleSearch = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CONSOLE_STORAGE, JSON.stringify(state));
+    } catch {
+      /* storage disabled */
+    }
+  }, [state]);
+
+  /* ---- mission clock --------------------------------------------------- */
+
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => setSimTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+
+  /* ---- visible bounds for region-scoped feeds -------------------------- */
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const bounds = boundsFromPov(povRef.current);
+      setBbox(
+        `${bounds.minLat.toFixed(2)},${bounds.minLng.toFixed(2)},${bounds.maxLat.toFixed(
+          2
+        )},${bounds.maxLng.toFixed(2)}`
+      );
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [pov]);
+
+  /* ---- console actions ------------------------------------------------- */
+
+  const toggleLayer = useCallback((id: LayerId) => {
+    setState((prev) => ({
+      ...prev,
+      enabled: prev.enabled.includes(id)
+        ? prev.enabled.filter((layer) => layer !== id)
+        : [...prev.enabled, id],
+    }));
+  }, []);
+
+  const soloLayer = useCallback((id: LayerId) => {
+    setState((prev) => ({
+      ...prev,
+      enabled: prev.enabled.length === 1 && prev.enabled[0] === id ? DEFAULT_ENABLED : [id],
+    }));
+  }, []);
+
+  const flyTo = useCallback((lat: number, lng: number, altitude = 0.6) => {
+    apiRef.current?.flyTo(lat, lng, altitude, 2200);
+  }, []);
+
+  const screenshot = useCallback(() => {
+    const dataUrl = apiRef.current?.screenshot();
+    if (!dataUrl) {
+      notify("Screenshot unavailable");
       return;
     }
+    const anchor = document.createElement("a");
+    anchor.href = dataUrl;
+    anchor.download = `osint-globe-${Date.now()}.png`;
+    anchor.click();
+    notify("Frame saved");
+  }, [notify]);
+
+  const share = useCallback(async () => {
+    const current = apiRef.current?.getPov() ?? povRef.current;
+    const hash = [
+      `${current.lat.toFixed(3)},${current.lng.toFixed(3)},${current.altitude.toFixed(3)}`,
+      state.sensor,
+      state.basemap,
+      state.enabled.join(","),
+    ].join("/");
+
+    const url = `${window.location.origin}${window.location.pathname}#${hash}`;
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
-      const data = await res.json();
-      setSearchResults(data);
-    } catch (e) {
-      console.error("Search error:", e);
+      await navigator.clipboard.writeText(url);
+      notify("View link copied");
+    } catch {
+      window.location.hash = hash;
+      notify("View link in address bar");
     }
-  };
+  }, [notify, state.basemap, state.enabled, state.sensor]);
 
-  const handleSelect = (result: any) => {
-    const toggles = (window as any).__globeToggles;
-    if (toggles && toggles.globe) {
-      toggles.globe.pointOfView({
-        lat: parseFloat(result.lat),
-        lng: parseFloat(result.lon),
-        altitude: 1.5,
-      });
-    }
-    setShowSearch(false);
-    setSearchQuery("");
-    setSearchResults([]);
-  };
+  const toggleLive = useCallback(() => {
+    setLive((value) => {
+      if (!value) setSimTime(new Date());
+      return !value;
+    });
+  }, []);
 
-  const handleTimelineToggle = () => {
-    setShowTimeline(!showTimeline);
-  };
+  /* ---- keyboard -------------------------------------------------------- */
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
+        if (event.key === "Escape") target.blur();
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const sensor = SENSORS.find((item) => item.hotkey === event.key);
+      if (sensor) {
+        setState((prev) => ({ ...prev, sensor: sensor.id }));
+        return;
+      }
+
+      switch (event.key) {
+        case "l":
+        case "L":
+          setShowLayers((value) => !value);
+          break;
+        case "t":
+        case "T":
+          setShowTimeline((value) => !value);
+          break;
+        case "/":
+          event.preventDefault();
+          searchRef.current?.focus();
+          break;
+        case "r":
+        case "R":
+          setState((prev) => ({ ...prev, autoRotate: !prev.autoRotate }));
+          break;
+        case "p":
+        case "P":
+          screenshot();
+          break;
+        case "+":
+        case "=":
+          apiRef.current?.zoomBy(0.6);
+          break;
+        case "-":
+        case "_":
+          apiRef.current?.zoomBy(1.6);
+          break;
+        case "?":
+          setShowHelp((value) => !value);
+          break;
+        case "Escape":
+          setSelection(null);
+          setShowSettings(false);
+          setShowPowerUp(false);
+          setShowHelp(false);
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [screenshot]);
+
+  /* ---- derived --------------------------------------------------------- */
+
+  const entityCount = useMemo(
+    () =>
+      state.enabled.reduce((total, layer) => total + (entities[layer]?.length ?? 0), 0),
+    [entities, state.enabled]
+  );
+
+  const onlineLayers = useMemo(
+    () =>
+      state.enabled.filter((layer) => {
+        const status = statuses[layer];
+        if (!status) return false;
+        if (layer === "graticule" || layer === "terminator") return true;
+        return Boolean(status.online);
+      }).length,
+    [state.enabled, statuses]
+  );
+
+  const selectedEntity: Entity | null = selection?.entity ?? null;
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden">
-      {/* Search bar */}
-      <div className="absolute left-4 top-4 z-20 w-80">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="🔍 Search location..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              handleSearch(e.target.value);
-            }}
-            onFocus={() => setShowSearch(true)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-900/90 px-4 py-2 text-sm text-slate-100 placeholder-slate-500 backdrop-blur focus:border-sky-500 focus:outline-none"
-          />
-          {showSearch && searchResults.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/95 shadow-xl backdrop-blur">
-              {searchResults.map((result: any) => (
-                <button
-                  key={result.place_id}
-                  className="block w-full px-4 py-2 text-left text-sm text-slate-300 hover:bg-slate-800"
-                  onClick={() => handleSelect(result)}
-                >
-                  {result.display_name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+    <main className="console">
+      <GlobeView
+        entities={entities}
+        enabled={state.enabled}
+        basemap={state.basemap}
+        sensor={state.sensor}
+        autoRotate={state.autoRotate}
+        mergePoints={state.mergePoints}
+        simTime={simTime}
+        selection={selection}
+        satelliteCatalog={satelliteCatalog}
+        onSelect={setSelection}
+        onPovChange={setPov}
+        apiRef={apiRef}
+      />
+
+      <HudFrame
+        sensor={state.sensor}
+        basemap={state.basemap}
+        entityCount={entityCount}
+        activeLayers={state.enabled.length}
+        totalLayers={LAYERS.length}
+        onlineLayers={onlineLayers}
+        simTime={simTime}
+        live={live}
+      />
+
+      {/* Top-left: search */}
+      <div className="console-corner console-corner-tl">
+        <SearchBar
+          inputRef={searchRef}
+          onFlyTo={(lat, lng, altitude) => flyTo(lat, lng, altitude ?? 0.35)}
+        />
       </div>
 
-      {/* Timeline button */}
-      <button
-        onClick={handleTimelineToggle}
-        className="absolute right-4 top-4 z-20 rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800"
-      >
-        🕒 Timeline
-      </button>
+      {/* Top-right: console buttons */}
+      <div className="console-corner console-corner-tr">
+        <button
+          className={`tool-btn ${showLayers ? "tool-btn-on" : ""}`}
+          onClick={() => setShowLayers((value) => !value)}
+        >
+          LAYERS
+        </button>
+        <button
+          className={`tool-btn ${showTimeline ? "tool-btn-on" : ""}`}
+          onClick={() => setShowTimeline((value) => !value)}
+        >
+          CLOCK
+        </button>
+        <button
+          className={`tool-btn ${showSettings ? "tool-btn-on" : ""}`}
+          onClick={() => setShowSettings((value) => !value)}
+        >
+          OPTICS
+        </button>
+        <button className="tool-btn" onClick={() => setShowPowerUp(true)}>
+          POWER UP
+        </button>
+        <button className="tool-btn tool-btn-icon" onClick={() => setShowHelp(true)}>
+          ?
+        </button>
+      </div>
 
-      <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center bg-slate-950 text-slate-400">Loading globe...</div>}>
-        <GlobeCanvas />
-      </Suspense>
-      
-      {showTimeline && (
-        <Suspense fallback={null}>
-          <TimelineScrubber
-            onDateChange={(date) => {
-              const toggles = (window as any).__globeToggles;
-              if (toggles && toggles.setTimelineDate) {
-                toggles.setTimelineDate(date);
-              }
-            }}
-          />
-        </Suspense>
+      {/* Bottom: sensor looks */}
+      <SensorBar
+        sensor={state.sensor}
+        onChange={(sensor) => setState((prev) => ({ ...prev, sensor }))}
+      />
+
+      {showLayers && (
+        <LayerDock
+          enabled={state.enabled}
+          statuses={statuses}
+          onToggle={toggleLayer}
+          onRefresh={(layer) => refresh(layer)}
+          onSolo={soloLayer}
+          onOpenPowerUp={() => setShowPowerUp(true)}
+          onClose={() => setShowLayers(false)}
+        />
       )}
-      
-      <BottomMenu />
+
+      {selectedEntity && selection && (
+        <Dossier
+          selection={selection}
+          onClose={() => setSelection(null)}
+          onFlyTo={(lat, lng) => flyTo(lat, lng, 0.45)}
+        />
+      )}
+
+      {showTimeline && (
+        <TimelineBar
+          simTime={simTime}
+          live={live}
+          speed={speed}
+          onScrub={setSimTime}
+          onToggleLive={toggleLive}
+          onSpeed={setSpeed}
+          onClose={() => setShowTimeline(false)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          basemap={state.basemap}
+          onBasemap={(basemap) => setState((prev) => ({ ...prev, basemap }))}
+          autoRotate={state.autoRotate}
+          onAutoRotate={(autoRotate) => setState((prev) => ({ ...prev, autoRotate }))}
+          mergePoints={state.mergePoints}
+          onMergePoints={(mergePoints) => setState((prev) => ({ ...prev, mergePoints }))}
+          onShare={share}
+          onScreenshot={screenshot}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showPowerUp && (
+        <PowerUp
+          keys={keys}
+          onChange={(next) => {
+            saveKeys(next);
+            setKeys(next);
+            notify("Keys saved — refreshing feeds");
+          }}
+          onClose={() => setShowPowerUp(false)}
+        />
+      )}
+
+      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+
+      {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
