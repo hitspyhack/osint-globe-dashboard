@@ -30,6 +30,8 @@ import {
   loadSites,
   loadVessels,
   loadWebcams,
+  loadMapillary,
+  mapillaryToEntity,
   parseTleText,
   quakeToEntity,
   radioToEntity,
@@ -85,6 +87,8 @@ interface StubResponse {
 const routes = new Map<string, StubResponse>();
 /** URL fragments that should raise a network error (like a CORS failure). */
 const deadUrls: string[] = [];
+/** Every fetch the stub saw, to assert where key headers actually go. */
+const requestLog: Array<{ url: string; headers: Record<string, string> }> = [];
 
 function jsonResponse(value: unknown, status = 200): StubResponse {
   return { status, body: JSON.stringify(value) };
@@ -98,6 +102,16 @@ const realFetch = globalThis.fetch;
 
 async function stubbedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = String(input instanceof Request ? input.url : input);
+
+  const loggedHeaders: Record<string, string> = {};
+  try {
+    new Headers(init?.headers).forEach((value, key) => {
+      loggedHeaders[key] = value;
+    });
+  } catch {
+    /* no headers */
+  }
+  requestLog.push({ url, headers: loggedHeaders });
 
   for (const dead of deadUrls) {
     if (url.includes(dead)) {
@@ -120,6 +134,7 @@ async function stubbedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 function resetFetchStubs(): void {
   routes.clear();
   deadUrls.length = 0;
+  requestLog.length = 0;
 }
 
 /* ------------------------------------------------------------------ *
@@ -280,8 +295,29 @@ const OVERPASS_WEBCAMS = jsonResponse({
   ],
 });
 
-const RADIO_BROWSER = jsonResponse([
-  {
+const MAPILLARY_PROXY = jsonResponse({
+  ok: true,
+  items: [
+    { id: "mly-111", lat: 38.524, lng: -8.888, thumbUrl: "https://example.com/mly-111.jpg", capturedAt: 1759990000000, isPano: true, compassAngle: 271.4 },
+    { id: "mly-222", lat: 38.531, lng: -8.901, thumbUrl: undefined, capturedAt: undefined, isPano: false, compassAngle: undefined },
+  ],
+  source: "Mapillary",
+});
+
+const MAPILLARY_DIRECT = jsonResponse({
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      id: "mly-333",
+      geometry: { type: "Point", coordinates: [-9.14, 38.72] },
+      properties: { compass_angle: 42.0, thumb_1024_url: "https://example.com/mly-333.jpg", captured_at: 1759991000000, is_pano: false },
+    },
+    { type: "Feature", id: "mly-bad", geometry: { type: "Point", coordinates: [] }, properties: {} },
+  ],
+});
+
+const RADIO_BROWSER = jsonResponse([  {
     stationuuid: "9606a7d1-0e1e-4a1c-acb5-7f6c9d8e1a2b",
     name: "Rádio Comercial",
     url: "http://example.com/stream",
@@ -600,8 +636,92 @@ async function testWebcams(): Promise<void> {
   ok(result.items.length === 1 && result.items[0].title === "Setúbal Bay", "windy payload parsed");
 }
 
+async function testMapillary(): Promise<void> {
+  console.log("\n📷  street imagery (Mapillary)");
+
+  const KEYS: ApiKeyMap = { MAPILLARY: "MLY|test|token" };
+
+  // Path A: proxy healthy with normalised items; the key rides the
+  // x-ogd-keys header on the proxy request only.
+  resetFetchStubs();
+  routes.set("/api/mapillary", MAPILLARY_PROXY);
+  let result = await loadMapillary(KEYS, "38.4,-9.0,38.6,-8.8");
+  ok(result.source === "mapillary/proxy", "proxy candidate used", result.source);
+  ok(result.items.length === 2, "normalised proxy records accepted", result.items.length);
+  const proxyRequest = requestLog.find((entry) => entry.url.includes("/api/mapillary"));
+  ok(Boolean(proxyRequest?.headers["x-ogd-keys"]), "POWER UP key sent to the proxy via x-ogd-keys");
+  ok(
+    !requestLog.some((entry) => !entry.url.includes("/api/") && entry.headers["x-ogd-keys"]),
+    "key header never attached to direct third-party requests"
+  );
+  const pano = result.items[0];
+  ok(pano.isPano && pano.thumbUrl?.includes("mly-111"), "pano flagged, thumb mapped");
+  const entity = mapillaryToEntity(pano);
+  ok(
+    entity.kind === "mapillary" && entity.link === "https://www.mapillary.com/app/?pKey=mly-111" && entity.imageUrl === pano.thumbUrl,
+    "mapillaryToEntity image + source link",
+    entity.link
+  );
+
+  // Path B: proxy fails → direct browser fetch with the token in the URL and
+  // the bbox reordered to Mapillary's minLng,minLat,maxLng,maxLat.
+  resetFetchStubs();
+  routes.set("/api/mapillary", failEnvelope());
+  routes.set("graph.mapillary.com/images", MAPILLARY_DIRECT);
+  result = await loadMapillary(KEYS, "38.4,-9.0,38.6,-8.8");
+  ok(result.source === "mapillary/direct", "falls back to mapillary/direct", result.source);
+  const directRequest = requestLog.find((entry) => entry.url.includes("graph.mapillary.com"));
+  ok(Boolean(directRequest?.url.includes("access_token=MLY%7Ctest%7Ctoken")), "token carried in the direct URL");
+  ok(
+    Boolean(directRequest?.url.includes("bbox=-9,38.4,-8.8,38.6")),
+    "bbox reordered to west,south,east,north",
+    directRequest?.url
+  );
+  ok(result.items.length === 1 && result.items[0].id === "mly-333", "GeoJSON features parsed, empty coords dropped");
+  ok(near(result.items[0].lat, 38.72, 1e-6) && near(result.items[0].lng, -9.14, 1e-6), "lng/lat order respected");
+
+  // Path C: zoomed out — the direct candidate is skipped entirely.
+  resetFetchStubs();
+  routes.set("/api/mapillary", failEnvelope());
+  let threw: unknown = null;
+  try {
+    await loadMapillary(KEYS, "-60,-170,60,170");
+  } catch (error) {
+    threw = error;
+  }
+  ok(threw instanceof FeedError, "wide bbox raises instead of querying Mapillary");
+  ok(
+    !requestLog.some((entry) => entry.url.includes("graph.mapillary.com")),
+    "no direct Mapillary request when zoomed out"
+  );
+
+  // No key: only the proxy candidate exists.
+  resetFetchStubs();
+  routes.set("/api/mapillary", failEnvelope());
+  threw = null;
+  try {
+    await loadMapillary(NO_KEYS, "38.4,-9.0,38.6,-8.8");
+  } catch (error) {
+    threw = error;
+  }
+  ok(threw instanceof FeedError, "no key + dead proxy → FeedError");
+  ok(!requestLog.some((entry) => entry.url.includes("graph.mapillary.com")), "no direct request without a token");
+}
+
 async function testRadio(): Promise<void> {
-  console.log("\n📻  radio grid (Radio Browser)");
+  console.log("\n📻  radio grid (Radio Browser) + key routing");
+
+  // POWER UP keys must reach our own proxies (x-ogd-keys) and never leak to
+  // direct third-party requests.
+  resetFetchStubs();
+  routes.set("/api/maritime", AIS_ENVELOPE);
+  await loadVessels({ AIS: "aishub-token" }, "37,-10,40,-7");
+  const maritimeRequest = requestLog.find((entry) => entry.url.includes("/api/maritime"));
+  ok(Boolean(maritimeRequest?.headers["x-ogd-keys"]), "AIS key reaches the maritime proxy");
+  ok(
+    !requestLog.some((entry) => !entry.url.includes("/api/") && entry.headers["x-ogd-keys"]),
+    "key header never leaks to third-party URLs"
+  );
 
   resetFetchStubs();
   routes.set("/api/radio", failEnvelope());
@@ -674,6 +794,7 @@ async function main(): Promise<void> {
     await testQuakes();
     await testHazards();
     await testWebcams();
+    await testMapillary();
     await testRadio();
     await testLaunches();
     await testSites();

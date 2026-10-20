@@ -1,6 +1,38 @@
 # OSINT Globe — Project Status
 
-**Version:** 0.3.1 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+**Version:** 0.4.0 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+
+---
+
+## What 0.4.0 changed
+
+- **Navigation joystick** (`components/JoystickNav.tsx`) — bottom-right stick
+  for pan / zoom / tilt / heading. Pan speed scales with camera altitude and
+  the basis follows the current heading, so stick-up always flies toward the
+  top of the screen. Tilt runs 0–80° from nadir; heading is a compass roll;
+  `⌖ N-UP` resets. The pad is keyboard-operable and the whole control can be
+  hidden in OPTICS.
+- **Camera orientation system** (`GlobeView.applyCameraOrientation`) — tilt
+  and heading are applied by wrapping `camera.lookAt`, which OrbitControls
+  calls every update immediately before the frame renders. The orientation is
+  rebuilt from the base nadir view each time (idempotent, no drift) and never
+  touches the controls' internal state, so drags, damping, flyTo tweens and
+  programmatic pans all keep working. Verified by
+  `npm run verify:nav` — a headless three.js golden model of the exact math
+  (14 assertions: signs, pan basis, tilt elevation, polar clamp, idempotency).
+- **Elevation surface opacity** — 0–100 % slider in OPTICS (persisted).
+  0 % hides the mesh, <100 % renders it translucent over the imagery
+  (`transparent`, no depth write), 100 % is a solid opaque shell.
+- **Mapillary street imagery layer** — new `/api/mapillary` proxy (Graph API
+  v4 `GET /images`, token from env or POWER UP, cached 60 s) with a direct
+  browser fallback; city-scale bboxes only (wider views skip the query
+  cleanly). Points render teal, 360° captures slightly larger; the dossier
+  shows the thumbnail and links to the source photo (CC-BY-SA).
+- **POWER UP keys now actually reach the proxies** — `feedHeaders` was defined
+  but never used, so AIS / FIRMS / OpenSky / Windy keys pasted into the panel
+  were silently dropped client-side. Keys now ride `x-ogd-keys` on the proxy
+  candidate only (asserted by the smoke test: never attached to direct
+  third-party requests).
 
 ---
 
@@ -76,12 +108,15 @@ be filtered, inspected and time-scrubbed.
 - All 13 API routes return well-formed envelopes, including the error paths.
 - All 7 GLSL shaders parse (validated with `@shaderfrog/glsl-parser`).
 - Console renders server-side; dev server compiles clean.
-- **`npm run smoke`** — 79 fixture assertions covering every feed loader,
+- **`npm run smoke`** — 96 fixture assertions covering every feed loader,
   every entity mapper, the proxy → browser-direct fallback chain of each
   layer, and the SGP4 pipeline (real ISS TLE propagated at its epoch:
   420 km / 7.67 km/s; synthetic fresh TLE at now; ground-track continuity;
   footprint radius). Runs offline against stubbed `fetch`, so it works in
-  sandboxes without egress.
+  sandboxes without egress. Also asserts POWER UP key routing (proxy-only
+  header) and the Mapillary bbox reorder + zoom gate.
+- **`npm run verify:nav`** — headless three.js golden model of the joystick
+  orientation/pan math (14 assertions).
 
 ### Fix from the fixture smoke test
 

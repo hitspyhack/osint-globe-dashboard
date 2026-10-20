@@ -1,4 +1,4 @@
-import { fetchFirst, parseEnvelope, type FeedCandidate } from "@/lib/feeds";
+import { fetchFirst, feedHeaders, parseEnvelope, type FeedCandidate } from "@/lib/feeds";
 import type { ApiKeyMap, Entity, EntityMeta } from "@/types";
 
 /* ------------------------------------------------------------------ *
@@ -132,8 +132,14 @@ const str = (value: unknown): string | undefined => {
   return text.length > 0 ? text : undefined;
 };
 
-function envelopeCandidate<T>(url: string, label: string): FeedCandidate<T> {
-  return { url, label, parse: (raw) => parseEnvelope(raw) as T };
+/**
+ * A candidate hitting one of our `/api/*` proxies. When keys are given they
+ * ride on the x-ogd-keys header for THIS candidate only — they must never be
+ * attached to direct third-party requests.
+ */
+function envelopeCandidate<T>(url: string, label: string, keys?: ApiKeyMap): FeedCandidate<T> {
+  const headers = keys ? feedHeaders(keys) : undefined;
+  return { url, label, parse: (raw) => parseEnvelope(raw) as T, init: headers ? { headers } : undefined };
 }
 
 /* ------------------------------------------------------------------ *
@@ -163,7 +169,7 @@ function openSkyStates(raw: unknown): AircraftRecord[] {
 export function loadFlights(keys: ApiKeyMap): Promise<{ items: AircraftRecord[]; source: string }> {
   return fetchFirst<AircraftRecord[]>(
     [
-      envelopeCandidate(`/api/aviation`, "opensky/proxy"),
+      envelopeCandidate(`/api/aviation`, "opensky/proxy", keys),
       {
         url: "https://opensky-network.org/api/states/all",
         label: "opensky/direct",
@@ -252,7 +258,7 @@ export function loadVessels(
 ): Promise<{ items: VesselRecord[]; source: string }> {
   const query = bbox ? `?bbox=${encodeURIComponent(bbox)}` : "";
   return fetchFirst<VesselRecord[]>([
-    envelopeCandidate(`/api/maritime${query}`, "ais/proxy"),
+    envelopeCandidate(`/api/maritime${query}`, "ais/proxy", keys),
   ], { timeoutMs: 20_000 });
 }
 
@@ -581,7 +587,7 @@ export function loadFires(
 
   return fetchFirst<HazardRecord[]>(
     [
-      envelopeCandidate(`/api/fires?${params.toString()}`, "fires/proxy"),
+      envelopeCandidate(`/api/fires?${params.toString()}`, "fires/proxy", keys),
       {
         url: `https://eonet.gsfc.nasa.gov/api/v2.1/events?${params.toString()}&status=open`,
         label: "eonet/direct:wildfires",
@@ -686,7 +692,7 @@ export function loadWebcams(keys: ApiKeyMap): Promise<{ items: WebcamRecord[]; s
   const candidates: FeedCandidate<WebcamRecord[]>[] = [];
 
   if (keys.WINDY) {
-    candidates.push(envelopeCandidate(`/api/webcams/windy?limit=200`, "windy/proxy"));
+    candidates.push(envelopeCandidate(`/api/webcams/windy?limit=200`, "windy/proxy", keys));
   }
 
   candidates.push(envelopeCandidate(`/api/webcams/osm?limit=200`, "osm/proxy"));
@@ -720,6 +726,102 @@ export function webcamToEntity(record: WebcamRecord): Entity {
     link: record.embedUrl ? undefined : record.imageUrl,
     meta: {
       Provider: record.source === "windy" ? "Windy" : "OpenStreetMap",
+      ID: record.id,
+    } satisfies EntityMeta,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Mapillary — street-level imagery (keyed)
+ * ------------------------------------------------------------------ */
+
+export interface MapillaryRecord {
+  id: string;
+  lat: number;
+  lng: number;
+  thumbUrl?: string;
+  /** Epoch ms. */
+  capturedAt?: number;
+  isPano?: boolean;
+  compassAngle?: number;
+}
+
+function mapillaryFeatures(raw: unknown): MapillaryRecord[] {
+  const features = (raw as { features?: Array<Record<string, any>> }).features ?? [];
+  return features
+    .map((feature) => {
+      const coords = feature.geometry?.coordinates;
+      const lng = num(coords?.[0]);
+      const lat = num(coords?.[1]);
+      if (lat === undefined || lng === undefined) return null;
+      const properties = feature.properties ?? {};
+      const capturedAt = num(properties.captured_at);
+      return {
+        id: str(feature.id) ?? `${lat},${lng}`,
+        lat,
+        lng,
+        thumbUrl: str(properties.thumb_1024_url),
+        capturedAt: capturedAt !== undefined ? capturedAt : undefined,
+        isPano: Boolean(properties.is_pano),
+        compassAngle: num(properties.compass_angle),
+      } satisfies MapillaryRecord;
+    })
+    .filter((image) => image !== null) as MapillaryRecord[];
+}
+
+/** Mapillary answers city-scale bboxes; wider views skip the query entirely. */
+const MAPILLARY_MAX_SPAN_DEG = 4;
+
+export function loadMapillary(
+  keys: ApiKeyMap,
+  bbox?: string
+): Promise<{ items: MapillaryRecord[]; source: string }> {
+  const query = bbox ? `?bbox=${encodeURIComponent(bbox)}` : "";
+  const candidates: FeedCandidate<MapillaryRecord[]>[] = [
+    envelopeCandidate(`/api/mapillary${query}`, "mapillary/proxy", keys),
+  ];
+
+  // Direct browser fallback carries the token in the URL — only Mapillary
+  // sees it, and only when the user pasted one into POWER UP.
+  const token = keys.MAPILLARY?.trim();
+  if (token && bbox) {
+    const [south, west, north, east] = bbox.split(",").map((value) => Number.parseFloat(value));
+    const spanOk =
+      [south, west, north, east].every((value) => Number.isFinite(value)) &&
+      north > south &&
+      east > west &&
+      Math.max(Math.abs(north - south), Math.abs(east - west)) <= MAPILLARY_MAX_SPAN_DEG;
+    if (spanOk) {
+      candidates.push({
+        url:
+          `https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}` +
+          `&bbox=${west},${south},${east},${north}` +
+          `&fields=id,geometry,compass_angle,thumb_1024_url,captured_at,is_pano`,
+        label: "mapillary/direct",
+        parse: mapillaryFeatures,
+      });
+    }
+  }
+
+  return fetchFirst(candidates, { timeoutMs: 25_000 });
+}
+
+export function mapillaryToEntity(record: MapillaryRecord): Entity {
+  return {
+    id: `mapillary:${record.id}`,
+    kind: "mapillary",
+    lat: record.lat,
+    lng: record.lng,
+    label: record.isPano ? "360° street photo" : "Street photo",
+    sublabel: record.capturedAt ? "Mapillary capture" : "Mapillary",
+    time: record.capturedAt,
+    weight: record.isPano ? 1 : 0,
+    imageUrl: record.thumbUrl,
+    link: `https://www.mapillary.com/app/?pKey=${record.id}`,
+    meta: {
+      Panorama: record.isPano,
+      Heading: record.compassAngle,
+      Captured: record.capturedAt,
       ID: record.id,
     } satisfies EntityMeta,
   };

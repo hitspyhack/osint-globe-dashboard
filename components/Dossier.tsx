@@ -16,7 +16,7 @@ const NUMERIC_KEYS = new Set(["Altitude", "Depth", "Velocity", "Footprint", "Spe
 
 function formatMetaValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
-  if (key === "Observed" && typeof value === "number") return formatUtc(value);
+  if ((key === "Observed" || key === "Captured") && typeof value === "number") return formatUtc(value);
   if (key === "NET" || key === "Window start" || key === "Window end") {
     return String(value).replace("T", " ").replace("Z", "Z");
   }

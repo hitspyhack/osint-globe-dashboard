@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { BASEMAP_BY_ID, LAYER_BY_ID } from "@/lib/layers";
 import { earthRotationAngle, SIDEREAL_AUTO_ROTATE_SPEED } from "@/lib/astronomy";
@@ -52,6 +52,7 @@ const STYLES: Record<EntityKind, KindStyle> = {
   storm: { radius: 0.26, altitude: 0.003 },
   flood: { radius: 0.24, altitude: 0.002 },
   webcam: { radius: 0.12, altitude: 0.001 },
+  mapillary: { radius: 0.12, altitude: 0.001 },
   radio: { radius: 0.1, altitude: 0.001 },
   launch: { radius: 0.34, altitude: 0.02 },
   site: { radius: 0.11, altitude: 0.001 },
@@ -80,6 +81,10 @@ function pointRadius(entity: Entity): number {
   if (entity.kind === "storm") {
     return style.radius + Math.min(2, (entity.weight ?? 0) / 1000);
   }
+  if (entity.kind === "mapillary") {
+    // 360° captures read slightly larger on the grid.
+    return style.radius + (entity.weight ? 0.06 : 0);
+  }
   return style.radius;
 }
 
@@ -93,6 +98,16 @@ export interface GlobeApi {
   screenshot(): string | null;
   setAutoRotate(enabled: boolean): void;
   zoomBy(factor: number): void;
+  /**
+   * Pan the view along the current screen orientation. `sx`/`sy` are stick
+   * deflections in [-1, 1] (right/up); the step is scaled by `dtSeconds` and
+   * by the camera altitude, so panning stays slow near the ground.
+   */
+  panBy(sx: number, sy: number, dtSeconds: number): void;
+  /** Tilt (0–80° from nadir) and heading (° clockwise from north). */
+  setOrientation(tilt: number, heading: number): void;
+  getOrientation(): { tilt: number; heading: number };
+  resetOrientation(): void;
 }
 
 export interface GlobeViewProps {
@@ -105,6 +120,8 @@ export interface GlobeViewProps {
   mergePoints: boolean;
   elevationEnabled: boolean;
   elevationExaggeration: number;
+  /** Terrain mesh opacity, 0 (invisible) – 100 (opaque). */
+  elevationOpacity: number;
   onElevationStatus: (status: ElevationStatus) => void;
   simTime: Date;
   selection: Selection | null;
@@ -127,6 +144,23 @@ interface PointDatum {
 
 type AnyGlobe = any;
 
+/** Scratch objects for the per-frame orientation / pan math (no allocation). */
+const ORIGIN = new THREE.Vector3(0, 0, 0);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const scratchMatrix = new THREE.Matrix4();
+const scratchNormal = new THREE.Vector3();
+const scratchUp = new THREE.Vector3();
+const scratchRight = new THREE.Vector3();
+const scratchDirection = new THREE.Vector3();
+const scratchPosition = new THREE.Vector3();
+
+/** Max camera tilt from nadir, degrees — keeps the horizon above the floor. */
+const MAX_TILT_DEG = 80;
+/** Pan speed at full stick deflection, degrees/second at globe-scale altitude. */
+const PAN_SPEED_DEG_PER_SEC = 22;
+/** Latitude clamp for the pan / camera sub-point. */
+const MAX_LAT_DEG = 85;
+
 /** NORAD id of the ISS, used for its TLE ground track. */
 const ISS_NORAD_ID = "25544";
 
@@ -143,6 +177,7 @@ export default function GlobeView({
   mergePoints,
   elevationEnabled,
   elevationExaggeration,
+  elevationOpacity,
   onElevationStatus,
   simTime,
   selection,
@@ -161,6 +196,11 @@ export default function GlobeView({
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const elevationExaggerationRef = useRef(elevationExaggeration);
   elevationExaggerationRef.current = elevationExaggeration;
+  const elevationOpacityRef = useRef(elevationOpacity);
+  elevationOpacityRef.current = elevationOpacity;
+  /** Navigational tilt/heading, degrees. Applied by the camera.lookAt wrap. */
+  const orientationRef = useRef({ tilt: 0, heading: 0 });
+  const lookAtRestoreRef = useRef<(() => void) | null>(null);
   const lastPointClickRef = useRef(0);
   const frameRef = useRef(0);
   const [ready, setReady] = useState(false);
@@ -173,6 +213,32 @@ export default function GlobeView({
   selectRef.current = onSelect;
   const povRef = useRef(onPovChange);
   povRef.current = onPovChange;
+
+  /* ---------------- navigational tilt / heading ---------------- */
+
+  // OrbitControls re-orients the camera with `camera.lookAt(target)` on every
+  // update, immediately before the frame renders. `applyCameraOrientation`
+  // rebuilds the orientation from scratch (idempotent): the native nadir /
+  // north-up view, a heading spin, then a horizon tilt. It is hooked into
+  // camera.lookAt so it always runs between the controls update and the render
+  // — drags, damping, programmatic pans and flyTo tweens all pick it up
+  // without fighting the controls' own state.
+  const applyCameraOrientation = useCallback(() => {
+    const globe = globeRef.current;
+    if (!globe) return;
+    const camera = globe.camera() as THREE.PerspectiveCamera | undefined;
+    if (!camera) return;
+
+    const { tilt, heading } = orientationRef.current;
+    scratchMatrix.lookAt(camera.position, ORIGIN, WORLD_UP);
+    camera.quaternion.setFromRotationMatrix(scratchMatrix);
+    // Heading is a roll around the view axis (compass: east is up at +90°),
+    // then the tilt leans the view toward the top-of-screen horizon. The
+    // pan basis below uses the camera's rolled up-axis, so the joystick's
+    // stick-up always flies toward the top of the screen.
+    if (heading !== 0) camera.rotateZ(-THREE.MathUtils.degToRad(heading));
+    if (tilt !== 0) camera.rotateX(THREE.MathUtils.degToRad(tilt));
+  }, []);
 
   /* ---------------- initialisation ---------------- */
 
@@ -231,6 +297,18 @@ export default function GlobeView({
               controls.maxDistance = 900;
             }
 
+            // Hook tilt/heading into the camera's lookAt so the orientation is
+            // re-applied after every controls update, right before rendering.
+            const camera = instance.camera() as THREE.PerspectiveCamera;
+            const nativeLookAt = camera.lookAt.bind(camera);
+            camera.lookAt = ((...args: Parameters<THREE.PerspectiveCamera["lookAt"]>) => {
+              (nativeLookAt as (...a: unknown[]) => void)(...args);
+              applyCameraOrientation();
+            }) as THREE.PerspectiveCamera["lookAt"];
+            lookAtRestoreRef.current = () => {
+              camera.lookAt = nativeLookAt;
+            };
+
             // Directional sunlight is re-aimed from the computed subsolar point.
             const light = instance.lights().find((item: any) => item.type === "DirectionalLight");
             if (light) {
@@ -269,6 +347,8 @@ export default function GlobeView({
       cancelled = true;
       cancelAnimationFrame(animationFrame);
       cancelAnimationFrame(frameRef.current);
+      lookAtRestoreRef.current?.();
+      lookAtRestoreRef.current = null;
       const scene = globeRef.current?.scene();
       if (terrainMeshRef.current) {
         scene?.remove(terrainMeshRef.current);
@@ -329,6 +409,60 @@ export default function GlobeView({
           { ...pov, altitude: Math.min(6, Math.max(0.02, pov.altitude * factor)) },
           600
         );
+      },
+      panBy: (sx: number, sy: number, dtSeconds: number) => {
+        const globe = globeRef.current;
+        const camera = globe?.camera() as THREE.PerspectiveCamera | undefined;
+        if (!globe || !camera) return;
+
+        // Screen up/right on the ground: the camera's own up axis projected
+        // onto the tangent plane at the sub-camera point, so panning follows
+        // the current heading/tilt instead of raw north.
+        scratchUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+        scratchNormal.copy(camera.position).normalize();
+        scratchUp.addScaledVector(scratchNormal, -scratchUp.dot(scratchNormal));
+        if (scratchUp.lengthSq() < 1e-6) return; // degenerate at the poles
+        scratchUp.normalize();
+        scratchRight.crossVectors(scratchUp, scratchNormal).normalize();
+        scratchDirection.copy(scratchRight).multiplyScalar(sx).addScaledVector(scratchUp, sy);
+
+        const magnitude = scratchDirection.length();
+        if (magnitude < 1e-6) return;
+        scratchDirection.multiplyScalar(1 / magnitude);
+
+        // Steps scale with altitude: whole-globe views sweep fast, close-ups crawl.
+        const altitude = Math.min(3, Math.max(0.05, globe.pointOfView()?.altitude ?? 1));
+        const delta = THREE.MathUtils.degToRad(
+          PAN_SPEED_DEG_PER_SEC * altitude * magnitude * dtSeconds
+        );
+        if (delta <= 0) return;
+
+        // Great-circle step from the current sub-point along the stick vector.
+        scratchPosition
+          .copy(scratchNormal)
+          .multiplyScalar(Math.cos(delta))
+          .addScaledVector(scratchDirection, Math.sin(delta));
+        // Keep the camera out of the polar gimbal zone.
+        const maxPolarY = Math.sin(THREE.MathUtils.degToRad(MAX_LAT_DEG));
+        if (Math.abs(scratchPosition.y) > maxPolarY) {
+          scratchPosition.y = Math.sign(scratchPosition.y) * maxPolarY;
+          scratchPosition.normalize();
+        }
+        const distance = camera.position.length();
+        camera.position.copy(scratchPosition).multiplyScalar(distance);
+      },
+      setOrientation: (tilt: number, heading: number) => {
+        const wrapped = ((heading % 360) + 540) % 360 - 180;
+        orientationRef.current = {
+          tilt: Math.min(MAX_TILT_DEG, Math.max(0, tilt)),
+          heading: wrapped,
+        };
+        applyCameraOrientation();
+      },
+      getOrientation: () => ({ ...orientationRef.current }),
+      resetOrientation: () => {
+        orientationRef.current = { tilt: 0, heading: 0 };
+        applyCameraOrientation();
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -439,6 +573,7 @@ export default function GlobeView({
         const mesh = createTerrainMesh(grid, elevationExaggerationRef.current);
         mesh.visible = true;
         mesh.userData.terrainBounds = { minMeters: grid.minMeters, maxMeters: grid.maxMeters };
+        setTerrainOpacity(mesh, elevationOpacityRef.current);
         globe.scene().add(mesh);
         terrainMeshRef.current = mesh;
         onElevationStatus({
@@ -466,6 +601,12 @@ export default function GlobeView({
       setTerrainExaggeration(terrainMeshRef.current, elevationExaggeration);
     }
   }, [elevationExaggeration, ready]);
+
+  useEffect(() => {
+    if (terrainMeshRef.current) {
+      setTerrainOpacity(terrainMeshRef.current, elevationOpacity);
+    }
+  }, [elevationOpacity, ready]);
 
   /* ---------------- live solar illumination ---------------- */
 
@@ -1236,6 +1377,16 @@ function setTerrainExaggeration(mesh: THREE.Mesh, value: number): void {
   const material = mesh.material as THREE.MeshPhongMaterial;
   const setter = material.userData.setTerrainExaggeration as ((scale: number) => void) | undefined;
   setter?.(value);
+}
+
+/** Relief surface opacity, 0–100: transparent overlay over the basemap or a solid DEM shell. */
+function setTerrainOpacity(mesh: THREE.Mesh, opacityPercent: number): void {
+  const material = mesh.material as THREE.MeshPhongMaterial;
+  const opacity = Math.min(1, Math.max(0, opacityPercent / 100));
+  material.opacity = opacity;
+  material.transparent = opacity < 1;
+  material.depthWrite = opacity >= 1;
+  material.visible = opacity > 0.001;
 }
 
 function aimSunlight(light: THREE.DirectionalLight, date: Date): void {

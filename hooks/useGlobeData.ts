@@ -10,6 +10,7 @@ import {
   loadHazards,
   loadIss,
   loadLaunches,
+  loadMapillary,
   loadMilitary,
   loadQuakes,
   loadRadio,
@@ -17,6 +18,7 @@ import {
   loadSites,
   loadVessels,
   loadWebcams,
+  mapillaryToEntity,
   quakeToEntity,
   radioToEntity,
   siteToEntity,
@@ -40,6 +42,7 @@ const CAPS: Partial<Record<LayerId, number>> = {
   volcanoes: 400,
   storms: 400,
   webcams: 500,
+  mapillary: 400,
   radio: 500,
   launches: 40,
   sites: 1800,
@@ -150,6 +153,10 @@ const LOADERS: Partial<Record<LayerId, Loader>> = {
   webcams: async ({ keys }) => {
     const { items, source } = await loadWebcams(keys);
     return { entities: items.map(webcamToEntity), source };
+  },
+  mapillary: async ({ keys, bbox }) => {
+    const { items, source } = await loadMapillary(keys, bbox);
+    return { entities: items.map(mapillaryToEntity), source };
   },
   radio: async () => {
     const { items, source } = await loadRadio();
