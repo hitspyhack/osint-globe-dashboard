@@ -61,6 +61,16 @@
   0.02 → 0.0008, joystick pan altitude floor 0.05 → 0.003. Basemap max zoom
   raised: satellite 14 → 19, street 14 → 19, dark 12 → 20, topo 13 → 17 —
   buildings and streets are readable at the closest view.
+- **Mouse 3D navigation** — right-drag (or ctrl/cmd + left-drag) now tilts
+  toward the horizon and rotates the heading through the same orientation
+  system the joystick drives. Previously the right button did nothing
+  (globe.gl disables pan) and the mouse had no access to tilt/heading at all.
+  The gesture is captured on the globe container in the capture phase so
+  OrbitControls never sees it (ctrl + left would otherwise start a rotate),
+  the context menu is suppressed over the canvas, and a finished look-drag's
+  trailing click does not count as a deselect. Grab feel: the scene follows
+  the cursor. Sign conventions, clamps and wrap pinned in `npm run
+  verify:nav` (now 21 assertions).
 - **Tests** — smoke suite 96 → 178 assertions: terminator geometry (5 dates ×
   4 invariants), `fetchFirst` fallthrough matrix, webcams bbox routing,
   Mapillary wide-view behaviour, reapi mirror, and entity-shape sanity

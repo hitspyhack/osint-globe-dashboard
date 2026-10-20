@@ -112,6 +112,12 @@ surface with the joystick's pan floor and fine zoom steps scaled to match —
 buildings, streets and even aircraft silhouettes are readable at the closest
 view.
 
+**Mouse 3D navigation** — drag to rotate the globe, scroll to zoom, and
+**right-drag (or ctrl-drag) to tilt toward the horizon and rotate the
+heading** for the full 3D view, Google-Earth style. The look gesture drives
+the same orientation system as the joystick, so pan direction, `⌖ N-UP` and
+the tilt/heading readouts all follow along.
+
 **Navigation joystick** — a bottom-right stick drives the camera: drag the pad
 to pan (speed scales with altitude, direction follows the current heading),
 hold `+` / `−` to zoom, slide **TILT** from straight-down to a near-horizon

@@ -11,6 +11,9 @@
  *   - tilt leans the view toward the top-of-screen horizon (elevation = tilt - 90°)
  *   - panning follows the tilted screen-up, so stick up always flies forward
  *   - the camera never crosses the polar gimbal zone and stays on its sphere
+ *   - mouse look (right / ctrl drag): drag right spins the world right,
+ *     drag down pulls the horizon in, tilt clamps 0–80°, heading wraps,
+ *     and the pan basis keeps following the rotated screen-up
  *
  *   node scripts/verify-nav-math.mjs
  */
@@ -20,6 +23,7 @@ import * as THREE from "three";
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const MAX_LAT_DEG = 85;
+const MAX_TILT_DEG = 80;
 
 let passed = 0;
 let failed = 0;
@@ -179,6 +183,61 @@ cam = cameraAt(89.99, 0);
 applyOrientation(cam, 0, 0);
 const moved = panBy(cam, 1, 0, THREE.MathUtils.degToRad(1));
 ok(Number.isFinite(cam.position.x + cam.position.y + cam.position.z), "no NaN near the pole", moved);
+
+/* ---- mirror of GlobeView mouse-look (right / ctrl drag) ---- */
+
+const LOOK_HEADING_DEG_PER_PX = 0.3;
+const LOOK_TILT_DEG_PER_PX = 0.25;
+
+function lookDelta(heading, tilt, dxPx, dyPx) {
+  return {
+    heading: ((heading - dxPx * LOOK_HEADING_DEG_PER_PX + 540) % 360) - 180,
+    tilt: Math.min(MAX_TILT_DEG, Math.max(0, tilt + dyPx * LOOK_TILT_DEG_PER_PX)),
+  };
+}
+
+console.log("\n🖱  mouse look (right / ctrl drag)");
+
+// 11. Grab feel: drag right spins the world right → heading falls.
+let look = lookDelta(0, 0, 100, 0);
+ok(look.heading < 0 && near(look.heading, -30, 1e-9), "drag right decreases heading (scene follows cursor)", look.heading);
+
+// 12. Drag down pulls the horizon into view → tilt rises from nadir.
+look = lookDelta(0, 0, 0, 100);
+ok(look.tilt > 0 && near(look.tilt, 25, 1e-9), "drag down tilts toward the horizon", look.tilt);
+
+// 13. Tilt clamps at both ends (nadir and the 80° horizon guard).
+ok(lookDelta(0, 10, 0, -1000).tilt === 0, "tilt clamps at 0° (straight down)");
+ok(lookDelta(0, 70, 0, 1000).tilt === MAX_TILT_DEG, "tilt clamps at the horizon guard (80°)");
+
+// 14. Heading wraps at the antimeridian instead of running away.
+look = lookDelta(170, 0, 200, 0); // 170 - 60 = 110 → no wrap needed yet
+ok(near(look.heading, 110, 1e-9), "heading arithmetic is exact mid-range", look.heading);
+look = lookDelta(-170, 0, 200, 0); // -170 - 60 = -230 → wraps to +130
+ok(near(look.heading, 130, 1e-9), "heading wraps at ±180°", look.heading);
+
+// 15. A look drag leaves tilt/heading usable by the pan basis: after a
+// look-drag orientation, stick-up still pans along the rotated screen-up.
+// (Bearing is measured against the local east/north tangent basis — raw
+// lat/lng deltas would distort it by cos(latitude).)
+cam = cameraAt(40, -8);
+const looked = lookDelta(0, 0, 100, 200); // heading -30, tilt 50
+applyOrientation(cam, looked.tilt, looked.heading);
+{
+  const sub = cam.position.clone().normalize();
+  const phi = Math.asin(sub.y);
+  const lambda = Math.atan2(sub.x, sub.z);
+  const north = new THREE.Vector3(-Math.sin(phi) * Math.sin(lambda), Math.cos(phi), -Math.sin(phi) * Math.cos(lambda));
+  const east = new THREE.Vector3(Math.cos(lambda), 0, -Math.sin(lambda));
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+  up.addScaledVector(sub, -up.dot(sub)).normalize();
+  const screenUpBearing = THREE.MathUtils.radToDeg(Math.atan2(up.dot(east), up.dot(north)));
+  ok(
+    Math.abs(screenUpBearing - looked.heading) < 0.01,
+    "after a look drag, stick-up pans along the rotated screen-up (bearing = heading)",
+    { heading: looked.heading, screenUpBearing }
+  );
+}
 
 console.log(`\n${failed === 0 ? "✅" : "❌"} ${passed} passed, ${failed} failed`);
 process.exitCode = failed === 0 ? 0 : 1;

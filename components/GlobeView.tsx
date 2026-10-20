@@ -206,6 +206,9 @@ const scratchPosition = new THREE.Vector3();
 
 /** Max camera tilt from nadir, degrees — keeps the horizon above the floor. */
 const MAX_TILT_DEG = 80;
+/** Mouse-look sensitivity: degrees of view rotation per pixel of drag. */
+const LOOK_HEADING_DEG_PER_PX = 0.3;
+const LOOK_TILT_DEG_PER_PX = 0.25;
 /** Pan speed at full stick deflection, degrees/second at globe-scale altitude. */
 const PAN_SPEED_DEG_PER_SEC = 22;
 /** Latitude clamp for the pan / camera sub-point. */
@@ -253,6 +256,18 @@ export default function GlobeView({
   const lookAtRestoreRef = useRef<(() => void) | null>(null);
   const lastPointClickRef = useRef(0);
   const frameRef = useRef(0);
+  /** Active mouse-look drag (right / ctrl drag), if any. */
+  const lookDragRef = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    tilt: number;
+    heading: number;
+  } | null>(null);
+  /** Timestamp of the last look gesture, so its trailing click is not a deselect. */
+  const lastLookRef = useRef(0);
+  /** Detaches the mouse-look listeners on teardown. */
+  const lookDetachRef = useRef<(() => void) | null>(null);
   /** Current object datums — kept for camera-distance scaling passes. */
   const objectsRef = useRef<ObjectDatum[]>([]);
   /** Camera-distance size factor applied to every object mesh (see tick). */
@@ -353,6 +368,79 @@ export default function GlobeView({
               controls.maxDistance = 900;
             }
 
+            // Mouse 3D navigation: right-drag (or ctrl/cmd + left-drag) tilts
+            // and rotates the view through the same orientation system the
+            // joystick drives — the mouse gets the full 3rd axis, not just
+            // orbit + zoom. The listeners live on the container in the
+            // CAPTURE phase so OrbitControls never sees these gestures
+            // (ctrl + left would otherwise start a globe rotate).
+            const surface = containerRef.current;
+            const isLookGesture = (event: PointerEvent) =>
+              event.button === 2 || (event.button === 0 && (event.ctrlKey || event.metaKey));
+
+            const onLookPointerDown = (event: PointerEvent) => {
+              if (!isLookGesture(event)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              const { tilt, heading } = orientationRef.current;
+              lookDragRef.current = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                tilt,
+                heading,
+              };
+              lastLookRef.current = Date.now();
+              surface.style.cursor = "grabbing";
+              try {
+                surface.setPointerCapture(event.pointerId);
+              } catch {
+                /* pointer capture is best effort */
+              }
+            };
+
+            const onLookPointerMove = (event: PointerEvent) => {
+              const drag = lookDragRef.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              event.preventDefault();
+              const dx = event.clientX - drag.x;
+              const dy = event.clientY - drag.y;
+              // Grab feel — the scene follows the cursor: drag right spins the
+              // world right (heading falls), drag down pulls the horizon down
+              // into view (tilt rises toward the horizon).
+              const heading = ((drag.heading - dx * LOOK_HEADING_DEG_PER_PX + 540) % 360) - 180;
+              const tilt = Math.min(MAX_TILT_DEG, Math.max(0, drag.tilt + dy * LOOK_TILT_DEG_PER_PX));
+              orientationRef.current = { tilt, heading };
+              applyCameraOrientation();
+            };
+
+            const onLookPointerUp = (event: PointerEvent) => {
+              if (lookDragRef.current?.pointerId !== event.pointerId) return;
+              lookDragRef.current = null;
+              lastLookRef.current = Date.now();
+              surface.style.cursor = "";
+            };
+
+            const onLookContextMenu = (event: MouseEvent) => {
+              // The right button is the look gesture — keep the menu away.
+              event.preventDefault();
+            };
+
+            surface.addEventListener("pointerdown", onLookPointerDown, true);
+            window.addEventListener("pointermove", onLookPointerMove, true);
+            window.addEventListener("pointerup", onLookPointerUp, true);
+            window.addEventListener("pointercancel", onLookPointerUp, true);
+            surface.addEventListener("contextmenu", onLookContextMenu);
+            lookDetachRef.current = () => {
+              surface.removeEventListener("pointerdown", onLookPointerDown, true);
+              window.removeEventListener("pointermove", onLookPointerMove, true);
+              window.removeEventListener("pointerup", onLookPointerUp, true);
+              window.removeEventListener("pointercancel", onLookPointerUp, true);
+              surface.removeEventListener("contextmenu", onLookContextMenu);
+              lookDragRef.current = null;
+              surface.style.cursor = "";
+            };
+
             // Hook tilt/heading into the camera's lookAt so the orientation is
             // re-applied after every controls update, right before rendering.
             const camera = instance.camera() as THREE.PerspectiveCamera;
@@ -403,6 +491,8 @@ export default function GlobeView({
       cancelled = true;
       cancelAnimationFrame(animationFrame);
       cancelAnimationFrame(frameRef.current);
+      lookDetachRef.current?.();
+      lookDetachRef.current = null;
       lookAtRestoreRef.current?.();
       lookAtRestoreRef.current = null;
       const scene = globeRef.current?.scene();
@@ -1269,6 +1359,9 @@ export default function GlobeView({
       // globe.gl's own point click fires first; ignore empty-space clicks that
       // are really part of a point selection.
       if (Date.now() - lastPointClickRef.current < 350) return;
+      // A finished look gesture (ctrl + left-drag) leaves a trailing click
+      // behind — that is camera work, not a deselect.
+      if (Date.now() - lastLookRef.current < 350) return;
       selectRef.current(null);
     };
 
