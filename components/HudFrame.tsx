@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { telemetry } from "@/lib/telemetry";
 import { formatUtcClock } from "@/lib/time";
+import { APP_NAME, APP_TAGLINE, APP_VERSION } from "@/lib/version";
 import { formatLatLng, altitudeToZoom } from "@/lib/geo";
 import { BASEMAP_BY_ID, SENSOR_BY_ID } from "@/lib/layers";
 import type { BasemapId, SensorId } from "@/types";
@@ -92,8 +93,9 @@ export default function HudFrame({
       <div className="hud-top">
         <div className="hud-chip hud-chip-title">
           <span className="hud-dot" />
-          OSINT GLOBE
-          <span className="hud-chip-dim">/ GODSEYE CONSOLE</span>
+          {APP_NAME.toUpperCase()}
+          <span className="hud-chip-dim">/ {APP_TAGLINE.toUpperCase()}</span>
+          <span className="hud-version">v{APP_VERSION}</span>
         </div>
 
         <div className="hud-chip">
@@ -153,6 +155,12 @@ export default function HudFrame({
         <div className="hud-telemetry-row hud-hide-sm">
           <span className="hud-label">DRAW</span>
           <span className="hud-value">{pulse.drawCalls.toLocaleString("en-US")}</span>
+        </div>
+        <div className="hud-telemetry-row">
+          <span className="hud-label">SHAPES</span>
+          <span className={`hud-value ${pulse.objects > 0 ? "hud-value-live-on" : ""}`}>
+            {pulse.objects.toLocaleString("en-US")}
+          </span>
         </div>
       </div>
 

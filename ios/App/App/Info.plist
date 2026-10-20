@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>OSINT Globe</string>
+        <string>All-Seeing Eye</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location centers the globe and is not saved. Visible map bounds may be sent to feed providers for area-based results.</string>
 	<key>CFBundleExecutable</key>

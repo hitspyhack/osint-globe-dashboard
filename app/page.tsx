@@ -8,6 +8,7 @@ import HelpOverlay from "@/components/HelpOverlay";
 import HudFrame from "@/components/HudFrame";
 import JoystickNav from "@/components/JoystickNav";
 import LayerDock from "@/components/LayerDock";
+import MatrixRain from "@/components/MatrixRain";
 import PowerUp from "@/components/PowerUp";
 import SearchBar from "@/components/SearchBar";
 import SensorBar from "@/components/SensorBar";
@@ -50,11 +51,15 @@ interface ConsoleState {
   basemap: BasemapId;
   autoRotate: boolean;
   mergePoints: boolean;
+  /** 3D entity shapes (jets, hulls, satellites…) instead of columns. */
+  objectShapes: boolean;
   elevationEnabled: boolean;
   elevationExaggeration: number;
   /** Terrain surface opacity, 0–100. */
   elevationOpacity: number;
   showJoystick: boolean;
+  /** Matrix digital-rain overlay across the console. */
+  matrixRain: boolean;
 }
 
 const DEFAULT_STATE: ConsoleState = {
@@ -63,10 +68,12 @@ const DEFAULT_STATE: ConsoleState = {
   basemap: "satellite",
   autoRotate: true,
   mergePoints: false,
+  objectShapes: true,
   elevationEnabled: false,
   elevationExaggeration: 30,
   elevationOpacity: 58,
   showJoystick: true,
+  matrixRain: false,
 };
 
 function isLayerId(value: string): value is LayerId {
@@ -143,6 +150,9 @@ export default function ConsolePage() {
             ? Math.min(100, Math.max(0, Number(parsed.elevationOpacity)))
             : prev.elevationOpacity,
           showJoystick: parsed.showJoystick === undefined ? prev.showJoystick : Boolean(parsed.showJoystick),
+          objectShapes:
+            parsed.objectShapes === undefined ? true : Boolean(parsed.objectShapes),
+          matrixRain: parsed.matrixRain === undefined ? false : Boolean(parsed.matrixRain),
         }));
       }
     } catch {
@@ -245,14 +255,31 @@ export default function ConsolePage() {
 
   /* ---- console actions ------------------------------------------------- */
 
-  const toggleLayer = useCallback((id: LayerId) => {
-    setState((prev) => ({
-      ...prev,
-      enabled: prev.enabled.includes(id)
-        ? prev.enabled.filter((layer) => layer !== id)
-        : [...prev.enabled, id],
-    }));
-  }, []);
+  const toggleLayer = useCallback(
+    (id: LayerId) => {
+      setState((prev) => ({
+        ...prev,
+        enabled: prev.enabled.includes(id)
+          ? prev.enabled.filter((layer) => layer !== id)
+          : [...prev.enabled, id],
+      }));
+
+      // Viewport-scoped feeds explain themselves the moment they are enabled:
+      // a green dot with zero tracks is otherwise indistinguishable from dead.
+      if (id === "mapillary") {
+        notify(
+          keys.MAPILLARY
+            ? "Street Imagery queries the current view — zoom into a city"
+            : "Street Imagery needs a free Mapillary token — add one in POWER UP"
+        );
+      } else if (id === "webcams") {
+        notify("Public Cameras query the current view — zoom in to scope the search");
+      } else if (id === "terminator") {
+        notify("Day/Night shades the night side and draws the terminator ring");
+      }
+    },
+    [keys.MAPILLARY, notify]
+  );
 
   const soloLayer = useCallback((id: LayerId) => {
     setState((prev) => ({
@@ -490,6 +517,7 @@ export default function ConsolePage() {
         sensor={state.sensor}
         autoRotate={state.autoRotate}
         mergePoints={state.mergePoints}
+        objectShapes={state.objectShapes}
         elevationEnabled={state.elevationEnabled}
         elevationExaggeration={state.elevationExaggeration}
         elevationOpacity={state.elevationOpacity}
@@ -502,6 +530,12 @@ export default function ConsolePage() {
         onPovChange={setPov}
         apiRef={apiRef}
       />
+
+      {state.matrixRain && (
+        <div className="matrix-rain-layer" aria-hidden="true">
+          <MatrixRain opacity={0.14} />
+        </div>
+      )}
 
       <HudFrame
         sensor={state.sensor}
@@ -613,6 +647,10 @@ export default function ConsolePage() {
           onAutoRotate={(autoRotate) => setState((prev) => ({ ...prev, autoRotate }))}
           mergePoints={state.mergePoints}
           onMergePoints={(mergePoints) => setState((prev) => ({ ...prev, mergePoints }))}
+          objectShapes={state.objectShapes}
+          onObjectShapes={(objectShapes) => setState((prev) => ({ ...prev, objectShapes }))}
+          matrixRain={state.matrixRain}
+          onMatrixRain={(matrixRain) => setState((prev) => ({ ...prev, matrixRain }))}
           elevationEnabled={state.elevationEnabled}
           onElevationEnabled={toggleElevation}
           elevationExaggeration={state.elevationExaggeration}

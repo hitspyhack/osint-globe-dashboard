@@ -1,12 +1,12 @@
 {
-  "name": "OSINT Globe — Godseye Console",
-  "short_name": "OSINT Globe",
-  "description": "Live OSINT globe: aircraft, vessels, satellites, hazards, cameras and radio on a 3D globe with sensor looks and a tactical HUD.",
+  "name": "All-Seeing Eye \u2014 Global OSINT Console",
+  "short_name": "All-Seeing Eye",
+  "description": "Matrix-styled live OSINT globe: aircraft, vessels, satellites, hazards, cameras and radio on a 3D globe with sensor looks, day/night shading and entity shapes.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#020617",
+  "background_color": "#010803",
+  "theme_color": "#00ff41",
   "orientation": "any",
   "icons": [
     {

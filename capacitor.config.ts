@@ -2,7 +2,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.hitspyhack.osintglobe",
-  appName: "OSINT Globe",
+  appName: "All-Seeing Eye",
   webDir: "www",
   backgroundColor: "#020617",
   loggingBehavior: "debug",

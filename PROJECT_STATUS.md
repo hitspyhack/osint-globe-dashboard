@@ -1,6 +1,46 @@
 # OSINT Globe — Project Status
 
-**Version:** 0.5.0 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+**Version:** 0.6.0 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+
+---
+
+## What 0.6.0 changed
+
+- **All-Seeing Eye** — the console is renamed (title, PWA manifest, iOS display
+  name, HUD chip, icons) and every "Godseye / God's Eye" reference is gone.
+  Product identity lives in `lib/version.ts` (`APP_NAME`, `APP_TAGLINE`,
+  `APP_VERSION`) and the HUD shows a version chip so a stale build is
+  immediately identifiable.
+- **Matrix HUD** — the tactical blue theme became a phosphor-green Matrix
+  theme: green-on-black palette (`--osint-*` variables and every hardcoded
+  chrome colour), per-panel/title glow, CRT scanlines with a slow sweep, a
+  joystick knob and corner brackets in green, and redesigned eye-and-graticule
+  app icons. New `components/MatrixRain.tsx` renders a canvas digital-rain
+  overlay — shown behind the boot splash and available across the console via
+  OPTICS → *Digital rain* (off by default).
+- **3D shapes could silently never show** — the shape pipeline was gated
+  behind the persisted *Merge points* toggle, so anyone who had ever enabled
+  it kept seeing cylinders no matter what. Shapes are now governed by their
+  own OPTICS toggle (*3D entity shapes*, default ON, persisted as
+  `objectShapes`) and *Merge points* only affects the points fallback for
+  over-budget layers. The HUD telemetry block gained a SHAPES row showing the
+  live object count, and a new `npm run verify:objects` golden model (17
+  assertions) runs the real three-globe headlessly to pin the pipeline:
+  placement at `polar2Cartesian`, degree rotations, untouched mesh scale,
+  prototype/material sharing, and survival across the teardown `deallocate`.
+- **Day/Night is now a real overlay** — a translucent shader veil
+  (`GlobeView.createNightVeil`) darkens the night side with a soft twilight
+  band, tracking the computed subsolar point (including mission-clock
+  scrubbing). FrontSide + depth-tested: markers above it stay bright, and it
+  fades itself out below street-level altitude. The crisp terminator ring
+  remains. Enabling the layer explains itself with a toast.
+- **Scoped layers explain themselves** — toggling Street Imagery without a
+  Mapillary token, or zoomed out, now raises an actionable toast (token →
+  POWER UP, or zoom into a city); Public Cameras and Day/Night do the same.
+  Mapillary cards and webcam cameras render slightly larger for visibility.
+- **Branding sweep** — `public/sw.js` cache bumped (`all-seeing-eye-v1`) so
+  installed PWAs pick up the new manifest and icons; theme/background colours
+  updated to the Matrix palette.
 
 ---
 
@@ -312,8 +352,9 @@ npm run dev            # http://localhost:3000
 npm run build          # production build
 npm run typecheck      # tsc --noEmit
 npm run smoke          # 178 fixture assertions across every feed + shapes
-npm run verify:nav     # joystick / orientation golden model (14 assertions)
+npm run verify:nav     # joystick / orientation / mouse-look golden model (21 assertions)
 npm run verify:frame   # objects-layer frame + heading sign (30 assertions)
+npm run verify:objects # three-globe objects pipeline, headless (17 assertions)
 ```
 
 Adding a layer is three steps: a `LayerDef` in `lib/layers.ts`, a loader +
@@ -321,3 +362,13 @@ normaliser in `lib/sources.ts` (plus an `/api/*` route if it needs caching or a
 key), and a shape builder + `OBJECT_BASE_SCALE` entry in
 `lib/entity-shapes.ts` (plus a `STYLES` entry for the points fallback). The
 dock, HUD counters and dossier pick it up automatically.
+
+---
+
+## Credits
+
+The console UX and sensor-look concepts were inspired by
+[bilawalsidhu/gods-eye-view](https://github.com/bilawalsidhu/gods-eye-view)
+(MIT, by Bilawal Sidhu & Sameh Khamis at Halfpixel). This project is an
+independent implementation on a different stack (Next.js + globe.gl instead
+of CesiumJS + Vite) and ships no data or assets from that repository.

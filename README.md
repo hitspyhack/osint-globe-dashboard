@@ -1,19 +1,13 @@
-# OSINT Globe — Godseye Console
+# All-Seeing Eye
 
 A live, open-source intelligence console for planet Earth: a 3D globe with
 aircraft, military traffic, ships, satellites, earthquakes, wildfires, public
-cameras, broadcast radio and launch pads — rendered with sensor looks and a
-tactical HUD.
+cameras, broadcast radio and launch pads — rendered with sensor looks under a
+Matrix-style phosphor HUD (scanlines, digital rain, green-on-black chrome).
 
 Built with **Next.js 15**, **React 19**, **globe.gl / three.js** and **satellite.js**
 (SGP4). No API key is required. Every launch starts with feeds off and offers
 four random layer choices before any live data is requested.
-
-> The HUD, sensor-look and console UX are inspired by
-> [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) (MIT, by
-> Bilawal Sidhu & Sameh Khamis at Halfpixel). This project is an independent
-> implementation on a different stack (Next.js + globe.gl instead of
-> CesiumJS + Vite) and ships no data or assets from that repository.
 
 ---
 
@@ -50,7 +44,7 @@ npm run build && npm start
 | 📻 Radio Grid | Geo-located broadcast stations — click to listen | Radio Browser | 🟢 |
 | 🚀 Launch Schedule | Upcoming orbital launches with pads, windows and countdown | Launch Library 2 | 🟢 |
 | 🏭 Installations | Airfields, ports, military areas, nuclear plants | OpenStreetMap (Overpass) | 🟢 |
-| 🧭 Graticule / 🌗 Day-Night | 10° grid and the computed day/night terminator | generated | 🟢 |
+| 🧭 Graticule / 🌗 Day-Night | 10° grid, night-side shading and the terminator ring | generated | 🟢 |
 | 🏔 Elevation / Terrain | Global Terrarium RGB DEM, color relief and displaced land mesh; adjustable from 1× to 100× | AWS Open Data · Terrarium tiles | 🟢 |
 
 🟢 works with no key · 🟡 unlocks or upgrades with a key. Terrain is an opt-in
@@ -59,6 +53,15 @@ visual layer in OPTICS rather than a live OSINT feed.
 ---
 
 ## Console features
+
+**Matrix HUD** — phosphor-green-on-black chrome with a per-panel glow, CRT
+scanlines and a slow sweep, a versioned title chip, and an optional digital
+rain overlay (OPTICS → *Digital rain*) layered over the globe without
+touching the panels. Enabling a scoped layer explains itself with a toast.
+
+**Day/Night overlay** — the Day-Night layer now darkens the whole night side
+of the globe with a soft twilight band (a shader veil that tracks the
+computed subsolar point) and still draws the crisp terminator ring.
 
 **Sensor looks** — GLSL post-processing on the live 3D scene (not a CSS filter
 over the canvas), plus matching chrome overlays:
@@ -140,7 +143,8 @@ OpenStreetMap and Street View links, inline camera feeds and live radio audio.
 **Mission clock** — scrub the last 30 days; satellite positions are
 re-propagated and USGS/EONET windows follow the pinned time.
 
-**Extras** — geocoded location search (`/`), on-demand device-location
+**Extras** — 3D entity shapes can be switched back to classic columns in
+OPTICS, geocoded location search (`/`), on-demand device-location
 centering, solo/refresh per layer, PNG screenshot (`P`), shareable view links
 (and the native iOS share sheet), keyboard-only operation (`?` for help), PWA
 offline shell.
