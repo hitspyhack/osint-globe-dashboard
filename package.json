@@ -1,6 +1,6 @@
 {
   "name": "osint-globe-dashboard",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "ios:run": "npm run ios:sync && npx cap run ios",
     "smoke": "tsx scripts/smoke-feeds.ts",
     "verify:nav": "node scripts/verify-nav-math.mjs",
-    "verify:frame": "node scripts/verify-object-frame.mjs"
+    "verify:frame": "node scripts/verify-object-frame.mjs",
+    "verify:objects": "node scripts/verify-objects-pipeline.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.3",

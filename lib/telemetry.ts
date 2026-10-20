@@ -15,6 +15,8 @@ export interface TelemetryState {
   drawCalls: number;
   triangles: number;
   tileCount: number;
+  /** Live 3D entity objects in the scene (shape pipeline confirmation). */
+  objects: number;
 }
 
 export const telemetry: TelemetryState = {
@@ -27,6 +29,7 @@ export const telemetry: TelemetryState = {
   drawCalls: 0,
   triangles: 0,
   tileCount: 0,
+  objects: 0,
 };
 
 export function resetTelemetry(): void {

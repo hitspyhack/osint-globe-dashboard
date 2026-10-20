@@ -20,6 +20,7 @@ import {
   prototypeFor,
   SHARED_OBJECT_MATERIAL,
 } from "@/lib/entity-shapes";
+import MatrixRain from "@/components/MatrixRain";
 import { groundTrack, splitTle } from "@/lib/satellite-propagation";
 import { telemetry } from "@/lib/telemetry";
 import type { SatelliteRecord } from "@/lib/sources";
@@ -122,8 +123,10 @@ export interface GlobeViewProps {
   basemap: BasemapId;
   sensor: SensorId;
   autoRotate: boolean;
-  /** Merge all points into one mesh: far faster, but no hover/click. */
+  /** Merge fallback points into one mesh: far faster, but no hover/click. */
   mergePoints: boolean;
+  /** Render entities as 3D shapes (jets, hulls, satellites...) instead of columns. */
+  objectShapes: boolean;
   elevationEnabled: boolean;
   elevationExaggeration: number;
   /** Terrain mesh opacity, 0 (invisible) – 100 (opaque). */
@@ -228,6 +231,7 @@ export default function GlobeView({
   sensor,
   autoRotate,
   mergePoints,
+  objectShapes,
   elevationEnabled,
   elevationExaggeration,
   elevationOpacity,
@@ -247,6 +251,8 @@ export default function GlobeView({
   const starFieldRef = useRef<THREE.Group | null>(null);
   const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
+  /** Night-side shading veil — follows the computed subsolar point. */
+  const nightVeilRef = useRef<THREE.Mesh | null>(null);
   const elevationExaggerationRef = useRef(elevationExaggeration);
   elevationExaggerationRef.current = elevationExaggeration;
   const elevationOpacityRef = useRef(elevationOpacity);
@@ -467,6 +473,13 @@ export default function GlobeView({
             starFieldRef.current = createStarField();
             scene.add(starFieldRef.current);
 
+            // Night-side veil: a translucent shell that darkens the half of the
+            // globe facing away from the Sun, with a soft twilight band along
+            // the terminator. FrontSide + depth-tested, so it fades out on its
+            // own once the camera descends inside its radius.
+            nightVeilRef.current = createNightVeil();
+            scene.add(nightVeilRef.current);
+
             // The tile engine lives on the inner ThreeGlobe object, which
             // globe.gl does not expose — find it by capability.
             tileTargetRef.current =
@@ -511,6 +524,12 @@ export default function GlobeView({
           materials.forEach((material) => material.dispose());
         });
         starFieldRef.current = null;
+      }
+      if (nightVeilRef.current) {
+        scene?.remove(nightVeilRef.current);
+        nightVeilRef.current.geometry.dispose();
+        (nightVeilRef.current.material as THREE.Material).dispose();
+        nightVeilRef.current = null;
       }
       sunLightRef.current = null;
       try {
@@ -757,19 +776,39 @@ export default function GlobeView({
   /* ---------------- live solar illumination ---------------- */
 
   useEffect(() => {
-    if (!ready || !sunLightRef.current) return;
-    aimSunlight(sunLightRef.current, simTime);
-  }, [ready, simTime]);
+    if (!ready) return;
+
+    const sun = subsolarPoint(simTime);
+    if (sunLightRef.current) aimSunlight(sunLightRef.current, simTime);
+
+    // Keep the night veil aimed at the same subsolar point. The Day/Night
+    // layer toggles the veil; the crisp terminator ring stays a path.
+    const veil = nightVeilRef.current;
+    if (veil) {
+      const latitude = (sun.lat * Math.PI) / 180;
+      const longitude = (sun.lng * Math.PI) / 180;
+      const material = veil.material as THREE.ShaderMaterial;
+      material.uniforms.uSunDirection.value
+        .set(
+          Math.cos(latitude) * Math.sin(longitude),
+          Math.sin(latitude),
+          Math.cos(latitude) * Math.cos(longitude)
+        )
+        .normalize();
+      veil.visible = enabledSet.has("terminator");
+    }
+  }, [ready, simTime, enabledSet]);
 
   /* ---------------- 3D entity objects ---------------- */
 
   // Entities become recognisable 3D shapes (aircraft, vessels, satellites...)
-  // unless point merging is on or a layer blows past its mesh budget, in which
-  // case it stays on the cheaper points pipeline.
+  // whenever shape rendering is on — deliberately NOT tied to "Merge points",
+  // which only governs the points fallback for over-budget layers. (Tying
+  // shapes to that performance toggle previously left users stuck on columns.)
   const objectPlan = useMemo(() => {
     const datums: ObjectDatum[] = [];
     const objectLayers = new Set<LayerId>();
-    if (!mergePoints) {
+    if (objectShapes) {
       enabledSet.forEach((layer) => {
         const items = entities[layer];
         if (!items || !items.length) return;
@@ -796,7 +835,7 @@ export default function GlobeView({
       });
     }
     return { datums, objectLayers };
-  }, [entities, enabledSet, mergePoints]);
+  }, [entities, enabledSet, objectShapes]);
 
   const objectThreeObject = useCallback((datum: ObjectDatum) => {
     // One shared prototype + shared material per (kind, colour): each mesh is a
@@ -1239,6 +1278,8 @@ export default function GlobeView({
           telemetry.drawCalls = renderer.info.render.calls;
           telemetry.triangles = renderer.info.render.triangles;
         }
+        // Visible confirmation that the 3D shape pipeline is live.
+        telemetry.objects = objectsRef.current.length;
       }
 
       const pov = globe.pointOfView();
@@ -1382,13 +1423,16 @@ export default function GlobeView({
     <div className="absolute inset-0">
       <div ref={containerRef} className={`globe-surface h-full w-full ${chromeClass}`} />
       {!ready && !initError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950 text-slate-400">
-          <div className="hud-spinner" />
-          <div className="text-xs uppercase tracking-[0.4em] text-sky-400">Initialising optics</div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#010803] text-[#6fbf85]">
+          <MatrixRain className="absolute inset-0" opacity={0.4} />
+          <div className="hud-spinner relative" />
+          <div className="relative text-xs uppercase tracking-[0.4em] text-emerald-400">
+            Initialising optics
+          </div>
         </div>
       )}
       {initError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950 px-8 text-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#010803] px-8 text-center">
           <div className="text-xs uppercase tracking-[0.3em] text-rose-400">Optics offline</div>
           <p className="max-w-md text-[11px] leading-relaxed text-slate-400">
             The 3D globe could not start. This usually means WebGL is unavailable or blocked in
@@ -1485,6 +1529,52 @@ function seededRandom(seed: number): () => number {
     state = (1664525 * state + 1013904223) >>> 0;
     return state / 0x1_0000_0000;
   };
+}
+
+/**
+ * Night-side shading for the Day/Night layer: a translucent shell just above
+ * the basemap (and typical terrain) that darkens everything facing away from
+ * the Sun. The fragment shader derives day/night from the world-space normal
+ * against the subsolar direction, with a smooth twilight band in between.
+ *
+ * FrontSide + depth-tested: markers and paths above the shell stay bright, and
+ * the veil disappears by itself once the camera drops inside its radius
+ * (street level), where whole-hlobe shading no longer makes sense.
+ */
+function createNightVeil(): THREE.Mesh {
+  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS_UNITS + 0.12, 64, 48);
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.FrontSide,
+    uniforms: {
+      uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uSunDirection;
+      varying vec3 vWorldPosition;
+      void main() {
+        // 1 where the surface points at the Sun, -1 on the far side.
+        float sun = dot(normalize(vWorldPosition), normalize(uSunDirection));
+        // Soft twilight band straddling the terminator.
+        float night = smoothstep(0.09, -0.14, sun);
+        gl_FragColor = vec4(0.004, 0.016, 0.024, night * 0.58);
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = "night-side-veil";
+  mesh.renderOrder = 1;
+  mesh.visible = false;
+  return mesh;
 }
 
 function createTerrainMesh(grid: GlobalTerrainGrid, initialExaggeration: number): THREE.Mesh {

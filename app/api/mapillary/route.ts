@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data, cached } = await fetchJson<{ features?: MapillaryFeature[] }>(
       `https://graph.mapillary.com/images?${query.toString()}`,
-      { ttlSeconds: 60, headers: { "User-Agent": "osint-globe-dashboard/0.5" } }
+      { ttlSeconds: 60, headers: { "User-Agent": "osint-globe-dashboard/0.6" } }
     );
 
     const items = normalise(data.features ?? []);

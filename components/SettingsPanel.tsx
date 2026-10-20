@@ -10,6 +10,10 @@ interface SettingsPanelProps {
   onAutoRotate: (value: boolean) => void;
   mergePoints: boolean;
   onMergePoints: (value: boolean) => void;
+  objectShapes: boolean;
+  onObjectShapes: (value: boolean) => void;
+  matrixRain: boolean;
+  onMatrixRain: (value: boolean) => void;
   elevationEnabled: boolean;
   onElevationEnabled: (value: boolean) => void;
   elevationExaggeration: number;
@@ -31,6 +35,10 @@ export default function SettingsPanel({
   onAutoRotate,
   mergePoints,
   onMergePoints,
+  objectShapes,
+  onObjectShapes,
+  matrixRain,
+  onMatrixRain,
   elevationEnabled,
   onElevationEnabled,
   elevationExaggeration,
@@ -155,12 +163,34 @@ export default function SettingsPanel({
         <label className="settings-toggle">
           <input
             type="checkbox"
+            checked={objectShapes}
+            onChange={(event) => onObjectShapes(event.target.checked)}
+          />
+          <span>
+            3D entity shapes
+            <em>jets, hulls, satellites, masts… instead of columns</em>
+          </span>
+        </label>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
             checked={mergePoints}
             onChange={(event) => onMergePoints(event.target.checked)}
           />
           <span>
             Merge points
-            <em>faster with huge feeds, disables clicking</em>
+            <em>faster fallback columns for huge feeds, disables their clicking</em>
+          </span>
+        </label>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={matrixRain}
+            onChange={(event) => onMatrixRain(event.target.checked)}
+          />
+          <span>
+            Digital rain
+            <em>Matrix overlay across the console</em>
           </span>
         </label>
         <label className="settings-toggle">

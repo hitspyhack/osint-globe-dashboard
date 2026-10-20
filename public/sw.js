@@ -1,5 +1,5 @@
 /*
- * Offline shell for the OSINT Globe console.
+ * Offline shell for the All-Seeing Eye console.
  *
  * Strategy:
  *   - navigations            → network first, fall back to the cached shell
@@ -10,7 +10,7 @@
  * aircraft position is worse than no position at all.
  */
 
-const CACHE_NAME = "osint-globe-v2";
+const CACHE_NAME = "all-seeing-eye-v1";
 const SHELL = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
