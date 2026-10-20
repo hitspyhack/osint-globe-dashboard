@@ -1,6 +1,6 @@
 # OSINT Globe — Project Status
 
-**Version:** 0.3.0 · **Updated:** 2026-10-18 · **Status:** ✅ Working, verified build
+**Version:** 0.3.1 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
 
 ---
 
@@ -76,6 +76,28 @@ be filtered, inspected and time-scrubbed.
 - All 13 API routes return well-formed envelopes, including the error paths.
 - All 7 GLSL shaders parse (validated with `@shaderfrog/glsl-parser`).
 - Console renders server-side; dev server compiles clean.
+- **`npm run smoke`** — 79 fixture assertions covering every feed loader,
+  every entity mapper, the proxy → browser-direct fallback chain of each
+  layer, and the SGP4 pipeline (real ISS TLE propagated at its epoch:
+  420 km / 7.67 km/s; synthetic fresh TLE at now; ground-track continuity;
+  footprint radius). Runs offline against stubbed `fetch`, so it works in
+  sandboxes without egress.
+
+### Fix from the fixture smoke test
+
+- **Satellites layer was silently empty through a healthy proxy.** The
+  `/api/satellites` route normalises the catalogue server-side
+  (`{name, noradId, tle, group}`), but the client's proxy candidate ran
+  `parseCelestrakJson` over it, which expects CelesTrak GP-JSON fields
+  (`TLE_LINE1`, `NORAD_CAT_ID`, …) — every record was dropped and the layer
+  reported success with 0 objects. This was invisible in the egress-less
+  sandbox (the proxy always fails there, so the direct TLE fallback hid it),
+  but on any normal deployment the satellites layer would have been dark.
+  `parseSatelliteItems` now accepts both shapes. The same audit confirmed
+  every other proxy route's envelope items match the client record types.
+- **OSM infrastructure direct fallback** labelled tag-mismatched elements
+  "Installation" instead of dropping them; now matches the proxy route's
+  `classify()` semantics (drop unknowns).
 
 ### Not verified here
 
@@ -143,8 +165,13 @@ network access before treating it as a bug.
 
 ## Backlog
 
+Backlog item 1 ("smoke-test every layer against live responses") is now
+covered offline by `npm run smoke` — 79 fixture assertions across every
+loader, parser, entity mapper and the SGP4 pipeline, including each layer's
+proxy → browser-direct fallback chain. Remaining gap: live upstream payloads
+still drift over time, so re-point fixtures at real responses occasionally.
+
 **High**
-1. Smoke-test every layer against live responses; fix shape drift.
 2. 3D aircraft/ship models oriented by heading via `objectsData`.
 3. Submarine cable + datacenter / critical-infrastructure datasets.
 4. AI briefing: summarise what is currently in view (OpenAI key, optional).

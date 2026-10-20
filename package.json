@@ -1,6 +1,6 @@
 {
   "name": "osint-globe-dashboard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "ios:sync": "node scripts/sync-ios.mjs",
     "ios:open": "npm run ios:sync && npx cap open ios",
-    "ios:run": "npm run ios:sync && npx cap run ios"
+    "ios:run": "npm run ios:sync && npx cap run ios",
+    "smoke": "tsx scripts/smoke-feeds.ts"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.3",
@@ -35,6 +36,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   },
   "overrides": {

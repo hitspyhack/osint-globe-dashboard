@@ -338,6 +338,23 @@ function parseCelestrakJson(raw: unknown, group: string): SatelliteRecord[] {
     .filter((sat) => sat !== null) as SatelliteRecord[];
 }
 
+/**
+ * Accept either shape our satellites proxy may emit: the route normalises the
+ * catalogue server-side ({name, noradId, tle, group}), but a passthrough of
+ * CelesTrak GP JSON ({TLE_LINE1, TLE_LINE2, NORAD_CAT_ID, OBJECT_NAME}) must
+ * keep working too.
+ */
+function parseSatelliteItems(raw: unknown, group: string): SatelliteRecord[] {
+  const items = Array.isArray(raw) ? raw : [];
+  const normalised = items.filter(
+    (item) => item && typeof (item as SatelliteRecord).tle === "string"
+  );
+  if (items.length === 0 || normalised.length === items.length) {
+    return items.map((item) => ({ ...(item as SatelliteRecord), group }));
+  }
+  return parseCelestrakJson(items, group);
+}
+
 export function loadSatelliteGroup(
   group: string
 ): Promise<{ items: SatelliteRecord[]; source: string }> {
@@ -346,7 +363,7 @@ export function loadSatelliteGroup(
       {
         url: `/api/satellites?group=${encodeURIComponent(group)}`,
         label: `celestrak/proxy:${group}`,
-        parse: (raw) => parseCelestrakJson(parseEnvelope(raw), group),
+        parse: (raw) => parseSatelliteItems(parseEnvelope(raw), group),
       },
       {
         url: `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=tle`,
@@ -888,17 +905,20 @@ export function loadSites(): Promise<{ items: SiteRecord[]; source: string }> {
       parse: (raw) => {
         const elements = (raw as { elements?: Record<string, any>[] }).elements ?? [];
         // The union query loses the per-filter label, so bucket by tags.
+        // Unknown tags cannot appear in this query's results, but drop them
+        // anyway so the direct path matches the proxy's classify() semantics.
         return elements
           .map((element) => {
             const tags: Record<string, string> = element.tags ?? {};
-            let kind = "Installation";
+            let kind: string | null = null;
             if (tags.aeroway === "aerodrome") kind = "Airfield";
             else if (tags.landuse === "harbour") kind = "Port";
             else if (tags.landuse === "military") kind = "Military";
             else if (tags.power === "plant") kind = "Nuclear";
+            if (!kind) return null;
             return osmSites({ elements: [element] }, kind)[0] ?? null;
           })
-          .filter((site) => site !== null) as SiteRecord[];
+          .filter((site): site is SiteRecord => site !== null);
       },
     },
   ], { timeoutMs: 90_000 });

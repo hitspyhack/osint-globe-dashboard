@@ -168,6 +168,10 @@ and the dossier are source-agnostic.
 in the dock and leaves a visible status, never a blank globe. Basemaps probe
 their tile server and fall back to the next template, then to a static texture.
 
+**Feed smoke tests.** `npm run smoke` runs 79 offline fixture assertions across
+every loader, parser, entity mapper and the SGP4 pipeline — no network needed —
+so parser drift is caught before it reaches the console.
+
 ---
 
 ## iOS / TestFlight (Capacitor)
