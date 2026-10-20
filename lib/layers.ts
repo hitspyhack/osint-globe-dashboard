@@ -121,6 +121,20 @@ export const LAYERS: LayerDef[] = [
     keyName: "WINDY",
   },
   {
+    id: "mapillary",
+    name: "Street Imagery",
+    icon: "📷",
+    color: "#2dd4bf",
+    group: "ground",
+    sources: "Mapillary Graph API",
+    intervalMs: 60_000,
+    keyless: false,
+    defaultOff: true,
+    blurb:
+      "Street-level photo positions in view — click one for the thumbnail. Needs a Mapillary token (POWER UP); zoom in to city scale to query.",
+    keyName: "MAPILLARY",
+  },
+  {
     id: "radio",
     name: "Radio Grid",
     icon: "📻",
@@ -274,6 +288,14 @@ export const BASEMAP_BY_ID: Record<BasemapId, BasemapDef> = BASEMAPS.reduce(
 );
 
 export const KEY_DEFS: KeyDef[] = [
+  {
+    id: "MAPILLARY",
+    label: "Mapillary token",
+    placeholder: "MLY|…|…",
+    hint: "Street-level photo positions on the globe. Free token from the Mapillary developer dashboard.",
+    unlocks: "Street Imagery",
+    signup: "https://www.mapillary.com/dashboard/developers",
+  },
   {
     id: "WINDY",
     label: "Windy Webcams",

@@ -51,6 +51,7 @@ export function resolveKeys(request: Request): ApiKeyMap {
   const fromHeader = decode(request.headers.get(KEYS_HEADER));
   const fromEnv: ApiKeyMap = {
     WINDY: process.env.WINDY_WEBCAMS_API_KEY ?? "",
+    MAPILLARY: process.env.MAPILLARY_ACCESS_TOKEN ?? process.env.MAPILLARY_TOKEN ?? "",
     AIS: process.env.AIS_API_KEY ?? process.env.SPIRE_API_KEY ?? process.env.MARINETRAFFIC_API_KEY ?? "",
     FIRMS: process.env.FIRMS_MAP_KEY ?? process.env.NASA_FIRMS_KEY ?? "",
     OPENSKY_USER: process.env.OPENSKY_USERNAME ?? "",

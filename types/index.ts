@@ -18,6 +18,7 @@ export type EntityKind =
   | "storm"
   | "flood"
   | "webcam"
+  | "mapillary"
   | "radio"
   | "launch"
   | "site";
@@ -62,6 +63,7 @@ export type LayerId =
   | "volcanoes"
   | "storms"
   | "webcams"
+  | "mapillary"
   | "radio"
   | "launches"
   | "sites"

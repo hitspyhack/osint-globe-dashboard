@@ -14,7 +14,11 @@ interface SettingsPanelProps {
   onElevationEnabled: (value: boolean) => void;
   elevationExaggeration: number;
   onElevationExaggeration: (value: number) => void;
+  elevationOpacity: number;
+  onElevationOpacity: (value: number) => void;
   elevationStatus: ElevationStatus;
+  showJoystick: boolean;
+  onShowJoystick: (value: boolean) => void;
   onShare: () => void;
   onScreenshot: () => void;
   onClose: () => void;
@@ -31,7 +35,11 @@ export default function SettingsPanel({
   onElevationEnabled,
   elevationExaggeration,
   onElevationExaggeration,
+  elevationOpacity,
+  onElevationOpacity,
   elevationStatus,
+  showJoystick,
+  onShowJoystick,
   onShare,
   onScreenshot,
   onClose,
@@ -101,6 +109,23 @@ export default function SettingsPanel({
           aria-label="Elevation vertical exaggeration, from 1 to 100 times"
         />
         <div className="elevation-scale-labels"><span>1× TRUE SCALE</span><span>100×</span></div>
+        <label className="elevation-range-label" htmlFor="elevation-opacity">
+          <span>SURFACE OPACITY</span>
+          <strong>{elevationOpacity}%</strong>
+        </label>
+        <input
+          id="elevation-opacity"
+          className="elevation-range"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={elevationOpacity}
+          disabled={!elevationEnabled}
+          onChange={(event) => onElevationOpacity(Number(event.target.value))}
+          aria-label="Terrain surface opacity, from fully transparent to fully opaque"
+        />
+        <div className="elevation-scale-labels"><span>0% TRANSPARENT</span><span>100% OPAQUE</span></div>
         <div className="elevation-legend" aria-hidden="true"><i /><i /><i /><i /><i /></div>
         {elevationStatus.phase === "loading" && (
           <div className="elevation-progress"><i style={{ width: `${elevationStatus.progress}%` }} /></div>
@@ -136,6 +161,17 @@ export default function SettingsPanel({
           <span>
             Merge points
             <em>faster with huge feeds, disables clicking</em>
+          </span>
+        </label>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={showJoystick}
+            onChange={(event) => onShowJoystick(event.target.checked)}
+          />
+          <span>
+            Navigation joystick
+            <em>pan, zoom, tilt and heading — bottom right</em>
           </span>
         </label>
       </section>

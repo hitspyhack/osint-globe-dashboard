@@ -8,7 +8,8 @@ const SHORTCUTS: Array<[string, string]> = [
   ["R", "Toggle the Earth's sidereal spin reference"],
   ["+ / -", "Zoom in / out"],
   ["P", "Screenshot the current frame"],
-  ["P", ""],
+  ["Arrows", "Pan the globe (joystick pad focused)"],
+  ["PgUp / PgDn", "Tilt the camera (joystick pad focused)"],
   ["Esc", "Close panels / clear selection"],
   ["?", "This help"],
 ];

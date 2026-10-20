@@ -46,6 +46,7 @@ npm run build && npm start
 | ⛰ Volcanoes | Activity, last 30 days | NASA EONET | 🟢 |
 | 🌀 Severe Storms | Tropical cyclones and severe systems | NASA EONET | 🟢 |
 | 📹 Public Cameras | Live thumbnails and embeds | Windy · OpenStreetMap | 🟢 / 🟡 |
+| 📷 Street Imagery | Street-level photo positions in view — click for the thumbnail | Mapillary Graph API | 🟡 |
 | 📻 Radio Grid | Geo-located broadcast stations — click to listen | Radio Browser | 🟢 |
 | 🚀 Launch Schedule | Upcoming orbital launches with pads, windows and countdown | Launch Library 2 | 🟢 |
 | 🏭 Installations | Airfields, ports, military areas, nuclear plants | OpenStreetMap (Overpass) | 🟢 |
@@ -83,9 +84,18 @@ fallback if a tile server is unreachable.
 
 **Elevation / terrain** — turn on the public AWS Terrarium RGB elevation tiles
 in OPTICS to build a global 3D relief mesh. Land height can be exaggerated from
-true scale to **100×**; the color ramp also communicates ocean depth. The global
-overview uses zoom-3 tiles (roughly 20 km/pixel at the equator), loaded only
-when requested, and reports source/CORS failures in the panel.
+true scale to **100×**, and the surface opacity is adjustable from **0 %**
+(fully transparent — relief colors tint the imagery) to **100 %** (a solid
+shell). The color ramp also communicates ocean depth. The global overview uses
+zoom-3 tiles (roughly 20 km/pixel at the equator), loaded only when requested,
+and reports source/CORS failures in the panel.
+
+**Navigation joystick** — a bottom-right stick drives the camera: drag the pad
+to pan (speed scales with altitude, direction follows the current heading),
+hold `+` / `−` to zoom, slide **TILT** from straight-down to a near-horizon
+view, hold `⟲` / `⟳` to rotate the heading, and `⌖ N-UP` resets north-up.
+The pad also takes focus for keyboard control (arrow keys pan, `+`/`−` zoom,
+`PageUp`/`PageDown` tilt). Hide or show it in OPTICS.
 
 **Universe reference** — a procedural deep-space starfield surrounds the globe.
 A compact heliocentric inset uses the current simulation date to show Earth's
@@ -167,6 +177,10 @@ and the dossier are source-agnostic.
 **Resilience.** Every feed fails independently: a dead upstream marks its layer
 in the dock and leaves a visible status, never a blank globe. Basemaps probe
 their tile server and fall back to the next template, then to a static texture.
+
+**Feed smoke tests.** `npm run smoke` runs 79 offline fixture assertions across
+every loader, parser, entity mapper and the SGP4 pipeline — no network needed —
+so parser drift is caught before it reaches the console.
 
 ---
 
@@ -256,8 +270,9 @@ provided/configured by the app owner.
 Live feeds remain subject to each provider's terms — check before commercial
 use. Notable ones: USGS and NASA EONET/FIRMS are public domain; OpenStreetMap
 and the Radio Browser directory are ODbL / CC; AISHub and OpenSky accounts are
-free for personal use. The console is for research and situational awareness;
-it republishes only what those providers already publish publicly.
+free for personal use. Mapillary imagery is CC-BY-SA — thumbnails link back to
+their source page on mapillary.com. The console is for research and situational
+awareness; it republishes only what those providers already publish publicly.
 
 ## License
 

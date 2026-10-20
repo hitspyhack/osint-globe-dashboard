@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dossier from "@/components/Dossier";
 import HelpOverlay from "@/components/HelpOverlay";
 import HudFrame from "@/components/HudFrame";
+import JoystickNav from "@/components/JoystickNav";
 import LayerDock from "@/components/LayerDock";
 import PowerUp from "@/components/PowerUp";
 import SearchBar from "@/components/SearchBar";
@@ -51,6 +52,9 @@ interface ConsoleState {
   mergePoints: boolean;
   elevationEnabled: boolean;
   elevationExaggeration: number;
+  /** Terrain surface opacity, 0–100. */
+  elevationOpacity: number;
+  showJoystick: boolean;
 }
 
 const DEFAULT_STATE: ConsoleState = {
@@ -61,6 +65,8 @@ const DEFAULT_STATE: ConsoleState = {
   mergePoints: false,
   elevationEnabled: false,
   elevationExaggeration: 30,
+  elevationOpacity: 58,
+  showJoystick: true,
 };
 
 function isLayerId(value: string): value is LayerId {
@@ -133,6 +139,10 @@ export default function ConsolePage() {
           elevationExaggeration: Number.isFinite(parsed.elevationExaggeration)
             ? Math.min(100, Math.max(1, Number(parsed.elevationExaggeration)))
             : prev.elevationExaggeration,
+          elevationOpacity: Number.isFinite(parsed.elevationOpacity)
+            ? Math.min(100, Math.max(0, Number(parsed.elevationOpacity)))
+            : prev.elevationOpacity,
+          showJoystick: parsed.showJoystick === undefined ? prev.showJoystick : Boolean(parsed.showJoystick),
         }));
       }
     } catch {
@@ -482,6 +492,7 @@ export default function ConsolePage() {
         mergePoints={state.mergePoints}
         elevationEnabled={state.elevationEnabled}
         elevationExaggeration={state.elevationExaggeration}
+        elevationOpacity={state.elevationOpacity}
         onElevationStatus={setElevationStatus}
         simTime={simTime}
         selection={selection}
@@ -504,6 +515,8 @@ export default function ConsolePage() {
       />
 
       {!selectedEntity && <UniverseWidget date={simTime} />}
+
+      {!selectedEntity && state.showJoystick && <JoystickNav apiRef={apiRef} />}
 
       {/* Top-left: search */}
       <div className="console-corner console-corner-tl">
@@ -606,7 +619,13 @@ export default function ConsolePage() {
           onElevationExaggeration={(elevationExaggeration) =>
             setState((prev) => ({ ...prev, elevationExaggeration: Math.min(100, Math.max(1, elevationExaggeration)) }))
           }
+          elevationOpacity={state.elevationOpacity}
+          onElevationOpacity={(elevationOpacity) =>
+            setState((prev) => ({ ...prev, elevationOpacity: Math.min(100, Math.max(0, elevationOpacity)) }))
+          }
           elevationStatus={elevationStatus}
+          showJoystick={state.showJoystick}
+          onShowJoystick={(showJoystick) => setState((prev) => ({ ...prev, showJoystick }))}
           onShare={share}
           onScreenshot={screenshot}
           onClose={() => setShowSettings(false)}
