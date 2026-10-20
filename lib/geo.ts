@@ -172,12 +172,15 @@ export function circlePolygon(
  */
 export function terminatorRing(date: Date, segments = 180): Array<[number, number]> {
   const sun = subsolarPoint(date);
-  const bearingToPole = sun.lat >= 0 ? 0 : 180;
-  const anti = destinationPoint(sun.lat, sun.lng, bearingToPole, Math.PI / 2);
+  // The terminator is the great circle 90° from the subsolar point — i.e. the
+  // circle whose pole is the ANTIPODE of the subsolar point (180° away, not
+  // 90°: that earlier mistake drew a near-meridian circle instead).
+  let antiLng = sun.lng + 180;
+  if (antiLng > 180) antiLng -= 360;
   const ring: Array<[number, number]> = [];
   for (let i = 0; i <= segments; i += 1) {
     const bearing = (i / segments) * 360;
-    const p = destinationPoint(anti.lat, anti.lng, bearing, Math.PI / 2);
+    const p = destinationPoint(-sun.lat, antiLng, bearing, Math.PI / 2);
     ring.push([p.lng, p.lat]);
   }
   return ring;

@@ -137,6 +137,23 @@ const str = (value: unknown): string | undefined => {
  * ride on the x-ogd-keys header for THIS candidate only — they must never be
  * attached to direct third-party requests.
  */
+/**
+ * Parse the console viewport bbox (`south,west,north,east`). Returns null when
+ * missing, malformed or wider than `maxSpanDeg` on either axis — feeds that
+ * can only answer city/region scale use this to skip doomed queries.
+ */
+function parseViewBounds(
+  bbox: string | undefined,
+  maxSpanDeg: number
+): { south: number; west: number; north: number; east: number } | null {
+  if (!bbox) return null;
+  const [south, west, north, east] = bbox.split(",").map((value) => Number.parseFloat(value));
+  if (![south, west, north, east].every((value) => Number.isFinite(value))) return null;
+  if (north <= south || east <= west) return null;
+  if (Math.max(Math.abs(north - south), Math.abs(east - west)) > maxSpanDeg) return null;
+  return { south, west, north, east };
+}
+
 function envelopeCandidate<T>(url: string, label: string, keys?: ApiKeyMap): FeedCandidate<T> {
   const headers = keys ? feedHeaders(keys) : undefined;
   return { url, label, parse: (raw) => parseEnvelope(raw) as T, init: headers ? { headers } : undefined };
@@ -217,6 +234,7 @@ export function loadMilitary(keys: ApiKeyMap): Promise<{ items: AircraftRecord[]
     [
       envelopeCandidate(`/api/aviation?scope=mil`, "adsb.lol/proxy"),
       { url: "https://api.adsb.lol/v2/mil", label: "adsb.lol", parse: adsbLolAircraft },
+      { url: "https://reapi.adsb.lol/v2/mil", label: "adsb.lol/reapi", parse: adsbLolAircraft },
       { url: "https://api.airplanes.live/v2/mil", label: "airplanes.live", parse: adsbLolAircraft },
     ],
     { timeoutMs: 20_000 }
@@ -688,20 +706,32 @@ function osmWebcams(raw: unknown): WebcamRecord[] {
     .filter((cam) => cam !== null) as WebcamRecord[];
 }
 
-export function loadWebcams(keys: ApiKeyMap): Promise<{ items: WebcamRecord[]; source: string }> {
+export function loadWebcams(
+  keys: ApiKeyMap,
+  bbox?: string
+): Promise<{ items: WebcamRecord[]; source: string }> {
   const candidates: FeedCandidate<WebcamRecord[]>[] = [];
 
+  // A viewport-scoped Overpass query is fast and reliable; the global webcam
+  // query is heavy and regularly rate-limited, so only fall back to it when
+  // there is no usable bbox (console bbox format: south,west,north,east).
+  // Views wider than 60° are effectively global — keep the world query there.
+  const scope = parseViewBounds(bbox, 60);
+  const bounds = scope ?? { south: -85, west: -180, north: 85, east: 180 };
+  const bboxQuery = `${bounds.south},${bounds.west},${bounds.north},${bounds.east}`;
+  const scopeParam = scope ? `&bbox=${encodeURIComponent(bbox!)}` : "";
+
   if (keys.WINDY) {
-    candidates.push(envelopeCandidate(`/api/webcams/windy?limit=200`, "windy/proxy", keys));
+    candidates.push(envelopeCandidate(`/api/webcams/windy?limit=200${scopeParam}`, "windy/proxy", keys));
   }
 
-  candidates.push(envelopeCandidate(`/api/webcams/osm?limit=200`, "osm/proxy"));
+  candidates.push(envelopeCandidate(`/api/webcams/osm?limit=200${scopeParam}`, "osm/proxy"));
 
   const overpassQuery =
-    '[out:json][timeout:60];(node["webcam"](-85,-180,85,180);node["contact:webcam"](-85,-180,85,180););out tags center 400;';
+    `[out:json][timeout:60];(node["webcam"](${bboxQuery});node["contact:webcam"](${bboxQuery}););out tags center 400;`;
   candidates.push({
     url: `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`,
-    label: "osm/direct",
+    label: scope ? "osm/direct:view" : "osm/direct",
     parse: osmWebcams,
   });
   candidates.push({
@@ -776,6 +806,15 @@ export function loadMapillary(
   keys: ApiKeyMap,
   bbox?: string
 ): Promise<{ items: MapillaryRecord[]; source: string }> {
+  const scope = parseViewBounds(bbox, MAPILLARY_MAX_SPAN_DEG);
+  const token = keys.MAPILLARY?.trim();
+
+  // A token is present but the view is wider than Mapillary can answer: report
+  // the zoom hint instead of hammering a doomed request (or an error).
+  if (token && !scope) {
+    return Promise.resolve({ items: [], source: "Mapillary — zoom in to query" });
+  }
+
   const query = bbox ? `?bbox=${encodeURIComponent(bbox)}` : "";
   const candidates: FeedCandidate<MapillaryRecord[]>[] = [
     envelopeCandidate(`/api/mapillary${query}`, "mapillary/proxy", keys),
@@ -783,24 +822,15 @@ export function loadMapillary(
 
   // Direct browser fallback carries the token in the URL — only Mapillary
   // sees it, and only when the user pasted one into POWER UP.
-  const token = keys.MAPILLARY?.trim();
-  if (token && bbox) {
-    const [south, west, north, east] = bbox.split(",").map((value) => Number.parseFloat(value));
-    const spanOk =
-      [south, west, north, east].every((value) => Number.isFinite(value)) &&
-      north > south &&
-      east > west &&
-      Math.max(Math.abs(north - south), Math.abs(east - west)) <= MAPILLARY_MAX_SPAN_DEG;
-    if (spanOk) {
-      candidates.push({
-        url:
-          `https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}` +
-          `&bbox=${west},${south},${east},${north}` +
-          `&fields=id,geometry,compass_angle,thumb_1024_url,captured_at,is_pano`,
-        label: "mapillary/direct",
-        parse: mapillaryFeatures,
-      });
-    }
+  if (token && scope) {
+    candidates.push({
+      url:
+        `https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}` +
+        `&bbox=${scope.west},${scope.south},${scope.east},${scope.north}` +
+        `&fields=id,geometry,compass_angle,thumb_1024_url,captured_at,is_pano`,
+      label: "mapillary/direct",
+      parse: mapillaryFeatures,
+    });
   }
 
   return fetchFirst(candidates, { timeoutMs: 25_000 });

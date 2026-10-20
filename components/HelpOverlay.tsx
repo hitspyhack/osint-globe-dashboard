@@ -14,6 +14,13 @@ const SHORTCUTS: Array<[string, string]> = [
   ["?", "This help"],
 ];
 
+const MOUSE: Array<[string, string]> = [
+  ["Drag", "Rotate the globe"],
+  ["Wheel", "Zoom in / out"],
+  ["Right-drag", "Tilt toward the horizon & rotate the heading — 3D view (Ctrl+drag works too)"],
+  ["Click", "Open a track's dossier"],
+];
+
 interface HelpOverlayProps {
   onClose: () => void;
 }
@@ -25,7 +32,7 @@ export default function HelpOverlay({ onClose }: HelpOverlayProps) {
         <header className="modal-header">
           <div>
             <h2 className="panel-title">CONSOLE KEYS</h2>
-            <p className="panel-sub">everything is keyboard driven</p>
+            <p className="panel-sub">keyboard and mouse driven</p>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
             ✕
@@ -35,14 +42,24 @@ export default function HelpOverlay({ onClose }: HelpOverlayProps) {
         <div className="modal-body">
           <table className="help-table">
             <tbody>
-              {SHORTCUTS.filter(([key]) => key !== "P" || true).map(([key, description], index) =>
-                description ? (
-                  <tr key={`${key}-${index}`}>
-                    <th>{key}</th>
-                    <td>{description}</td>
-                  </tr>
-                ) : null
-              )}
+              {SHORTCUTS.map(([key, description], index) => (
+                <tr key={`${key}-${index}`}>
+                  <th>{key}</th>
+                  <td>{description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 className="panel-title mt-4 text-[11px]">MOUSE</h3>
+          <table className="help-table">
+            <tbody>
+              {MOUSE.map(([key, description], index) => (
+                <tr key={`${key}-${index}`}>
+                  <th>{key}</th>
+                  <td>{description}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
 

@@ -48,6 +48,13 @@ const CAPS: Partial<Record<LayerId, number>> = {
   sites: 1800,
 };
 
+/**
+ * Feeds whose queries are viewport-scoped (webcams, street imagery, AIS).
+ * They re-run when the view settles on a new region, not just on their poll
+ * interval — otherwise a zoom-to-city would keep yesterday's empty result.
+ */
+const BBOX_SENSITIVE: ReadonlySet<LayerId> = new Set(["webcams", "mapillary", "vessels"]);
+
 const SATELLITE_GROUPS = [
   "stations",
   "weather",
@@ -150,8 +157,8 @@ const LOADERS: Partial<Record<LayerId, Loader>> = {
     });
     return { entities: items.map((item) => hazardToEntity(item, "storm")), source };
   },
-  webcams: async ({ keys }) => {
-    const { items, source } = await loadWebcams(keys);
+  webcams: async ({ keys, bbox }) => {
+    const { items, source } = await loadWebcams(keys, bbox);
     return { entities: items.map(webcamToEntity), source };
   },
   mapillary: async ({ keys, bbox }) => {
@@ -514,6 +521,23 @@ export function useGlobeData({ enabled, keys, simTime, live, bbox }: GlobeDataOp
       mountedRef.current = false;
     };
   }, []);
+
+  /* ---- viewport-scoped feeds follow the camera -------------------------- */
+
+  const lastBboxRef = useRef(bbox);
+  useEffect(() => {
+    if (bbox === lastBboxRef.current) return;
+    const timer = setTimeout(() => {
+      lastBboxRef.current = bbox;
+      (argsRef.current.enabled ?? [])
+        .filter((id) => BBOX_SENSITIVE.has(id))
+        .forEach((id) => {
+          inFlightRef.current.delete(id);
+          void runLayer(id);
+        });
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [bbox, runLayer]);
 
   return { entities, statuses, satelliteCatalog, refresh };
 }

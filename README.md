@@ -37,7 +37,7 @@ npm run build && npm start
 | Layer | What you get | Source | Key |
 |---|---|---|---|
 | ✈ Live Flights | Global ADS-B traffic, altitude-scaled | OpenSky Network · adsb.lol | 🟢 |
-| 🎖 Military Traffic | ADS-B contacts flagged military / state | adsb.lol · airplanes.live | 🟢 |
+| 🎖 Military Traffic | ADS-B contacts flagged military / state | adsb.lol · reapi.adsb.lol · airplanes.live | 🟢 |
 | 🚢 Live Vessels | AIS ship positions | AISHub · Spire · MarineTraffic · Datalastic | 🟡 |
 | 🛰 Satellites | 700+ objects, SGP4-propagated in real time, with ground tracks and sensor footprints | CelesTrak GP | 🟢 |
 | 🧑‍🚀 ISS / Crewed | Live position + orbital ground track | Open Notify · CelesTrak | 🟢 |
@@ -45,12 +45,12 @@ npm run build && npm start
 | 🔥 Wildfires | EONET incidents, or VIIRS hotspots with a FIRMS key | NASA EONET · NASA FIRMS | 🟢 / 🟡 |
 | ⛰ Volcanoes | Activity, last 30 days | NASA EONET | 🟢 |
 | 🌀 Severe Storms | Tropical cyclones and severe systems | NASA EONET | 🟢 |
-| 📹 Public Cameras | Live thumbnails and embeds | Windy · OpenStreetMap | 🟢 / 🟡 |
-| 📷 Street Imagery | Street-level photo positions in view — click for the thumbnail | Mapillary Graph API | 🟡 |
+| 📹 Public Cameras | Live thumbnails and embeds, queried for the current view | Windy · OpenStreetMap | 🟢 / 🟡 |
+| 📷 Street Imagery | Street-level photo positions — zoom into a city to query, click for the thumbnail | Mapillary Graph API | 🟡 |
 | 📻 Radio Grid | Geo-located broadcast stations — click to listen | Radio Browser | 🟢 |
 | 🚀 Launch Schedule | Upcoming orbital launches with pads, windows and countdown | Launch Library 2 | 🟢 |
 | 🏭 Installations | Airfields, ports, military areas, nuclear plants | OpenStreetMap (Overpass) | 🟢 |
-| 🧭 Graticule / 🌗 Day-Night | 10° grid and a computed sun terminator | generated | 🟢 |
+| 🧭 Graticule / 🌗 Day-Night | 10° grid and the computed day/night terminator | generated | 🟢 |
 | 🏔 Elevation / Terrain | Global Terrarium RGB DEM, color relief and displaced land mesh; adjustable from 1× to 100× | AWS Open Data · Terrarium tiles | 🟢 |
 
 🟢 works with no key · 🟡 unlocks or upgrades with a key. Terrain is an opt-in
@@ -89,6 +89,34 @@ true scale to **100×**, and the surface opacity is adjustable from **0 %**
 shell). The color ramp also communicates ocean depth. The global overview uses
 zoom-3 tiles (roughly 20 km/pixel at the equator), loaded only when requested,
 and reports source/CORS failures in the panel.
+
+**3D entity shapes** — every layer renders as recognisable 3D objects instead
+of anonymous columns: aircraft and military tracks are swept-wing jets sitting
+at their (exaggerated) flight level, nose pointed along the live ADS-B
+heading; vessels are hulls with superstructures rotated to their AIS course;
+satellites are body + solar-wing + dish models at their true SGP4 altitude
+(the ISS gets its truss-and-arrays silhouette); radio masts, webcam cameras,
+Mapillary photo cards with capture-direction chevrons, gradient flames,
+cratered volcano cones, spiral storm systems, flood discs with rooftops,
+finned rockets, roofed site blocks and gradient quake octahedrons (ripple
+rings stay). Each (kind, colour) pair is one merged vertex-coloured geometry
+drawn with a single shared material, and object size scales with camera
+distance so shapes hold a constant share of the screen from orbit down to
+street level. The busiest layers keep a mesh budget (flights 3000, military
+1500) and fall back to the points pipeline beyond it; "Merge points" in OPTICS
+forces points for everything.
+
+**Imagery & zoom** — the SATELLITE and STREET basemaps now load tiles up to
+zoom 19 (TOPO 17, DARK 20), and the camera can descend to ~4.5 km above the
+surface with the joystick's pan floor and fine zoom steps scaled to match —
+buildings, streets and even aircraft silhouettes are readable at the closest
+view.
+
+**Mouse 3D navigation** — drag to rotate the globe, scroll to zoom, and
+**right-drag (or ctrl-drag) to tilt toward the horizon and rotate the
+heading** for the full 3D view, Google-Earth style. The look gesture drives
+the same orientation system as the joystick, so pan direction, `⌖ N-UP` and
+the tilt/heading readouts all follow along.
 
 **Navigation joystick** — a bottom-right stick drives the camera: drag the pad
 to pan (speed scales with altitude, direction follows the current heading),

@@ -64,6 +64,8 @@ export async function fetchFirst<T>(
 ): Promise<FeedSuccess<T>> {
   const { timeoutMs = 12_000, headers = {}, signal } = options;
   const attempts: string[] = [];
+  /** First candidate that answered successfully but carried no items. */
+  let empty: FeedSuccess<T> | null = null;
 
   for (const candidate of candidates) {
     const request = createRequestSignal(signal, timeoutMs);
@@ -89,6 +91,17 @@ export async function fetchFirst<T>(
       }
 
       const items = candidate.parse(payload);
+
+      // A parse that yields nothing is not a win: upstream shape drift and
+      // throttled responses parse "successfully" into empty lists, which used
+      // to shadow healthy mirrors and report the layer online with 0 items.
+      // Keep the first empty answer as a fallback and try the next candidate.
+      if (Array.isArray(items) && items.length === 0) {
+        if (!empty) empty = { items, source: candidate.label };
+        attempts.push(`${candidate.label}: 0 items`);
+        continue;
+      }
+
       return { items, source: candidate.label };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -98,6 +111,10 @@ export async function fetchFirst<T>(
       request.cleanup();
     }
   }
+
+  // Every candidate failed or came back empty: a legitimate empty feed is
+  // still better than an error (e.g. a region with nothing to report).
+  if (empty) return empty;
 
   throw new FeedError(attempts.join(" · ") || "no candidates", attempts);
 }

@@ -1,6 +1,82 @@
 # OSINT Globe — Project Status
 
-**Version:** 0.4.0 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+**Version:** 0.5.0 · **Updated:** 2026-10-20 · **Status:** ✅ Working, verified build + fixture-tested feeds
+
+---
+
+## What 0.5.0 changed
+
+- **3D entity shapes for every layer** (`lib/entity-shapes.ts`, new) — each
+  (kind, colour) pair builds ONE merged, vertex-coloured `BufferGeometry`
+  prototype drawn with a single shared `MeshLambertMaterial`: aircraft and
+  military contacts are swept-wing jets with engines and tailplanes, vessels
+  are hull + deckhouse + bridge + funnel, satellites get body + solar wings +
+  dish, the ISS a truss-and-arrays silhouette, plus radio masts, webcam
+  cameras, Mapillary photo cards (capture-direction chevron), gradient flame
+  cones, cratered volcanoes, flat spiral storms with an eye, flood discs with
+  rooftops, finned rockets, roofed site blocks and gradient quake octahedra.
+  Prototypes are cached per (kind, colour); meshes are one draw call each.
+  three-globe's teardown `deallocate`s removed objects (geometry and material
+  included), so the shared prototypes/material neutralise `dispose` — that is
+  deliberate, not a leak.
+- **Heading- and altitude-correct placement** — shapes are built in the
+  objects-layer local frame (+Z surface normal, +Y north, +X east; verified
+  numerically by `npm run verify:frame` against three-globe's own
+  `polar2Cartesian`) and rotated by `-Heading`/`-Course` degrees so jets and
+  hulls point along their live track. Aircraft AND military use the
+  exaggerated flight-level curve `0.004 + min(alt_km, 14)·0.0008`;
+  satellites/ISS sit at true SGP4 altitude. Object size scales with camera
+  distance (`clamp(alt/2.4, 0.02, 1)`, applied by direct `mesh.scale` writes
+  from the render tick — three-globe never touches mesh scale, so no data
+  rebuilds are needed while zooming).
+- **Object budgets & fallbacks** — flights > 3000 or military > 1500 contacts
+  fall back to the points pipeline; "Merge points" (OPTICS) forces points for
+  everything. Click/hover/dossier selection works on objects exactly like
+  points (`objectLabel` + `onObjectClick` wired to the same selection path).
+- **Day/Night terminator FIXED** — `terminatorRing` previously produced a
+  wrong circle: the antipode longitude normalisation was applied to the
+  subsolar longitude itself. The ring is now the true great circle 90° from
+  the subsolar point; the smoke test asserts every point is exactly 90° away
+  and the latitude span matches ±(90 − |declination|) at both solstices, both
+  equinoxes and the live date.
+- **Empty feeds no longer shadow healthy mirrors** — `fetchFirst` treats a
+  candidate that parses to `[]` as a fallback, not a win (shape drift and
+  throttled responses used to report the layer "online" with 0 items while a
+  healthy mirror sat untried). All-empty → first empty answer; throw only
+  when every candidate failed.
+- **Military feed resilience** — added the `reapi.adsb.lol/v2/mil` mirror
+  between adsb.lol and airplanes.live.
+- **Public Cameras populate properly** — the global Overpass webcam query was
+  heavy and regularly rate-limited. Webcams are now viewport-scoped: a bbox
+  (≤ 60° span) rides `/api/webcams/osm|windy` and is injected into the
+  Overpass query; wide views keep the global query. The layer re-fetches when
+  the view settles on a new region (2.5 s debounce), and polls every 120 s.
+- **Street Imagery wide views answer cleanly** — with a token but a
+  wider-than-4° view, `loadMapillary` returns an empty success labelled
+  "Mapillary — zoom in to query" without any network request; the proxy does
+  the same when no bbox has arrived yet. The layer shows green with an
+  actionable label instead of an error.
+- **Street-level zoom** — `controls.minDistance` 101.5 → 100.07 (~4.5 km
+  above the surface, inside the near-plane safety margin), `zoomBy` floor
+  0.02 → 0.0008, joystick pan altitude floor 0.05 → 0.003. Basemap max zoom
+  raised: satellite 14 → 19, street 14 → 19, dark 12 → 20, topo 13 → 17 —
+  buildings and streets are readable at the closest view.
+- **Mouse 3D navigation** — right-drag (or ctrl/cmd + left-drag) now tilts
+  toward the horizon and rotates the heading through the same orientation
+  system the joystick drives. Previously the right button did nothing
+  (globe.gl disables pan) and the mouse had no access to tilt/heading at all.
+  The gesture is captured on the globe container in the capture phase so
+  OrbitControls never sees it (ctrl + left would otherwise start a rotate),
+  the context menu is suppressed over the canvas, and a finished look-drag's
+  trailing click does not count as a deselect. Grab feel: the scene follows
+  the cursor. Sign conventions, clamps and wrap pinned in `npm run
+  verify:nav` (now 21 assertions).
+- **Tests** — smoke suite 96 → 178 assertions: terminator geometry (5 dates ×
+  4 invariants), `fetchFirst` fallthrough matrix, webcams bbox routing,
+  Mapillary wide-view behaviour, reapi mirror, and entity-shape sanity
+  (finite/bounded geometry for all 15 kinds, cache identity, heading parsing,
+  dispose no-op). New `npm run verify:frame` golden model (30 assertions)
+  pins the objects-layer local frame and heading sign.
 
 ---
 
@@ -186,11 +262,14 @@ network access before treating it as a bug.
   layer stays dark until an AISHub / Spire / Datalastic / MarineTraffic key is
   added.
 - **Point merging trade-off.** Points are individual meshes so they stay
-  clickable. "Merge points" in OPTICS trades clicking for speed on huge feeds.
+  clickable. "Merge points" in OPTICS trades clicking for speed on huge feeds;
+  with it off, entity layers render as 3D shapes and the busiest feeds
+  (flights > 3000, military > 1500) fall back to points to cap the mesh count.
 - **OpenSky anonymous access** is heavily rate-limited; the route falls back to
   an adsb.lol regional query. Add OpenSky credentials for reliable global traffic.
 - **Overpass layers** (cameras, installations) are slow by nature — off by
-  default, cached 1h/12h on the proxy.
+  default, cached 1h/12h on the proxy. Cameras are viewport-scoped now, so the
+  heavy global query only runs on wide views.
 - **Elevation is a global overview, not city-scale terrain.** The opt-in
   Terrarium DEM samples zoom-3 coverage (~20 km/pixel at the equator); fine
   local relief and photorealistic 3D buildings still need higher-zoom terrain
@@ -201,27 +280,26 @@ network access before treating it as a bug.
 ## Backlog
 
 Backlog item 1 ("smoke-test every layer against live responses") is now
-covered offline by `npm run smoke` — 79 fixture assertions across every
+covered offline by `npm run smoke` — 178 fixture assertions across every
 loader, parser, entity mapper and the SGP4 pipeline, including each layer's
 proxy → browser-direct fallback chain. Remaining gap: live upstream payloads
 still drift over time, so re-point fixtures at real responses occasionally.
 
 **High**
-2. 3D aircraft/ship models oriented by heading via `objectsData`.
-3. Submarine cable + datacenter / critical-infrastructure datasets.
-4. AI briefing: summarise what is currently in view (OpenAI key, optional).
+2. Submarine cable + datacenter / critical-infrastructure datasets.
+3. AI briefing: summarise what is currently in view (OpenAI key, optional).
 
 **Medium**
-5. Track trails: persist recent positions per entity and draw fading paths.
-6. Region alerts: notify when new M5+ quakes or military traffic enter view.
-7. Saved views / bookmarks with named shareable links.
-8. Heatmap mode for quake and fire density.
-9. Convoy/vessel dwell detection, gap analysis for AIS.
+4. Track trails: persist recent positions per entity and draw fading paths.
+5. Region alerts: notify when new M5+ quakes or military traffic enter view.
+6. Saved views / bookmarks with named shareable links.
+7. Heatmap mode for quake and fire density.
+8. Convoy/vessel dwell detection, gap analysis for AIS.
 
 **Low**
-10. Light HUD theme for daytime basemaps.
-11. Voice control ("fly to Taipei", "show me military flights").
-12. Unit tests for the parsers in `lib/sources.ts`.
+9. Light HUD theme for daytime basemaps.
+10. Voice control ("fly to Taipei", "show me military flights").
+11. Unit tests for the parsers in `lib/sources.ts`.
 
 ---
 
@@ -230,12 +308,16 @@ still drift over time, so re-point fixtures at real responses occasionally.
 ```bash
 git pull
 npm install
-npm run dev        # http://localhost:3000
-npm run build      # production build
-npm run typecheck  # tsc --noEmit
+npm run dev            # http://localhost:3000
+npm run build          # production build
+npm run typecheck      # tsc --noEmit
+npm run smoke          # 178 fixture assertions across every feed + shapes
+npm run verify:nav     # joystick / orientation golden model (14 assertions)
+npm run verify:frame   # objects-layer frame + heading sign (30 assertions)
 ```
 
 Adding a layer is three steps: a `LayerDef` in `lib/layers.ts`, a loader +
 normaliser in `lib/sources.ts` (plus an `/api/*` route if it needs caching or a
-key), and a style entry in `components/GlobeView.tsx`. The dock, HUD counters
-and dossier pick it up automatically.
+key), and a shape builder + `OBJECT_BASE_SCALE` entry in
+`lib/entity-shapes.ts` (plus a `STYLES` entry for the points fallback). The
+dock, HUD counters and dossier pick it up automatically.

@@ -19,7 +19,12 @@ export async function GET(request: NextRequest) {
   }
 
   const params = request.nextUrl.searchParams;
-  const bbox = params.get("bbox") ?? "-180,-85,180,85";
+  // Console bbox format: south,west,north,east (Windy wants west,south,east,north).
+  const bbox = params.get("bbox") ?? "-85,-180,85,180";
+  const [south, west, north, east] = bbox.split(",").map((value) => Number.parseFloat(value));
+  const windyBbox = [west, south, east, north].every((value) => Number.isFinite(value))
+    ? `${west},${south},${east},${north}`
+    : "-180,-85,180,85";
   const limit = Math.min(Number.parseInt(params.get("limit") ?? "200", 10) || 200, 500);
 
   try {
@@ -28,7 +33,7 @@ export async function GET(request: NextRequest) {
       webcams?: Array<Record<string, any>>;
     }>(
       `https://api.windy.com/webcams/api/v3/webcams?bbox=${encodeURIComponent(
-        bbox
+        windyBbox
       )}&limit=${limit}`,
       { ttlSeconds: 600, headers: { "x-windy-api-key": key } }
     );

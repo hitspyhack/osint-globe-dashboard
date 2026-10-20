@@ -40,7 +40,10 @@ import {
   webcamToEntity,
   type AircraftRecord,
 } from "../lib/sources";
-import { FeedError, parseEnvelope } from "../lib/feeds";
+import { FeedError, fetchFirst, parseEnvelope } from "../lib/feeds";
+import { subsolarPoint, terminatorRing } from "../lib/geo";
+import { headingDegrees, prototypeFor } from "../lib/entity-shapes";
+import type { Entity, EntityKind } from "../types";
 import {
   footprintRadius,
   groundTrack,
@@ -461,6 +464,15 @@ async function testMilitary(): Promise<void> {
   ok(result.source === "airplanes.live", "mirror fallback to airplanes.live", result.source);
   ok(result.items.length === 1 && result.items[0].callsign === "RRR7210", "airplanes.live parsed");
 
+  // The reapi.adsb.lol mirror sits between adsb.lol and airplanes.live.
+  resetFetchStubs();
+  routes.set("/api/aviation?scope=mil", failEnvelope());
+  deadUrls.push("://api.adsb.lol"); // scheme-pinned so reapi.adsb.lol survives
+  routes.set("reapi.adsb.lol/v2/mil", ADSB_LOL_MIL);
+  result = await loadMilitary(NO_KEYS);
+  ok(result.source === "adsb.lol/reapi", "reapi.adsb.lol mirror tried before airplanes.live", result.source);
+  ok(result.items.length === 2, "reapi payload parsed");
+
   const entity = aircraftToEntity(reach, "military");
   ok(entity.kind === "military" && entity.id === "military:ae1234", "military entity id/kind", entity.id);
 }
@@ -634,6 +646,40 @@ async function testWebcams(): Promise<void> {
   result = await loadWebcams(WINDY_KEYS);
   ok(result.source === "windy/proxy", "windy candidate tried first with a key", result.source);
   ok(result.items.length === 1 && result.items[0].title === "Setúbal Bay", "windy payload parsed");
+
+  // Viewport-scoped: the bbox rides the proxy URL and the Overpass query.
+  resetFetchStubs();
+  routes.set("/api/webcams/osm", failEnvelope());
+  routes.set("overpass-api.de/api/interpreter", OVERPASS_WEBCAMS);
+  let scoped = await loadWebcams(NO_KEYS, "38.3,-9.2,38.7,-8.7");
+  ok(scoped.source === "osm/direct:view", "scoped Overpass candidate labelled", scoped.source);
+  const scopedProxy = requestLog.find((entry) => entry.url.includes("/api/webcams/osm"));
+  ok(
+    Boolean(scopedProxy?.url.includes("bbox=38.3%2C-9.2%2C38.7%2C-8.7")),
+    "bbox forwarded to the osm proxy",
+    scopedProxy?.url
+  );
+  const scopedOverpass = requestLog.find((entry) => entry.url.includes("overpass-api.de"));
+  ok(
+    Boolean(scopedOverpass?.url.includes("38.3%2C-9.2%2C38.7%2C-8.7")),
+    "scoped bbox injected into the Overpass query",
+    scopedOverpass?.url
+  );
+
+  // Wide views (>60° span) keep the global query.
+  resetFetchStubs();
+  routes.set("/api/webcams/osm", failEnvelope());
+  routes.set("overpass-api.de/api/interpreter", OVERPASS_WEBCAMS);
+  const wide = await loadWebcams(NO_KEYS, "-80,-170,80,170");
+  ok(wide.source === "osm/direct", "wide view keeps the global candidate", wide.source);
+  const wideProxy = requestLog.find((entry) => entry.url.includes("/api/webcams/osm"));
+  ok(!wideProxy?.url.includes("bbox="), "no bbox param on wide views", wideProxy?.url);
+  const wideOverpass = requestLog.find((entry) => entry.url.includes("overpass-api.de"));
+  ok(
+    Boolean(wideOverpass?.url.includes("-85%2C-180%2C85%2C180")),
+    "global bbox in the Overpass query for wide views",
+    wideOverpass?.url
+  );
 }
 
 async function testMapillary(): Promise<void> {
@@ -680,25 +726,18 @@ async function testMapillary(): Promise<void> {
   ok(result.items.length === 1 && result.items[0].id === "mly-333", "GeoJSON features parsed, empty coords dropped");
   ok(near(result.items[0].lat, 38.72, 1e-6) && near(result.items[0].lng, -9.14, 1e-6), "lng/lat order respected");
 
-  // Path C: zoomed out — the direct candidate is skipped entirely.
+  // Path C: zoomed out with a key — a clean "zoom in" answer, zero requests.
+  // The layer stays green with an actionable source label instead of an error.
   resetFetchStubs();
-  routes.set("/api/mapillary", failEnvelope());
-  let threw: unknown = null;
-  try {
-    await loadMapillary(KEYS, "-60,-170,60,170");
-  } catch (error) {
-    threw = error;
-  }
-  ok(threw instanceof FeedError, "wide bbox raises instead of querying Mapillary");
-  ok(
-    !requestLog.some((entry) => entry.url.includes("graph.mapillary.com")),
-    "no direct Mapillary request when zoomed out"
-  );
+  const wide = await loadMapillary(KEYS, "-60,-170,60,170");
+  ok(wide.items.length === 0, "wide view returns an empty list, not an error");
+  ok(wide.source.includes("zoom in"), "source tells the user to zoom in", wide.source);
+  ok(requestLog.length === 0, "no network request at all for wide views", requestLog);
 
   // No key: only the proxy candidate exists.
   resetFetchStubs();
   routes.set("/api/mapillary", failEnvelope());
-  threw = null;
+  let threw: unknown = null;
   try {
     await loadMapillary(NO_KEYS, "38.4,-9.0,38.6,-8.8");
   } catch (error) {
@@ -766,6 +805,206 @@ async function testSites(): Promise<void> {
   ok(entity.kind === "site" && entity.sublabel === "Airfield", "siteToEntity");
 }
 
+async function testFetchFirstFallthrough(): Promise<void> {
+  console.log("\n🔁  fetchFirst empty-fallthrough");
+
+  const arrayParse = (raw: unknown) => (Array.isArray(raw) ? raw : []);
+
+  // An empty parse is not a win: the next healthy candidate takes over.
+  resetFetchStubs();
+  routes.set("/feed/empty", jsonResponse([]));
+  routes.set("/feed/full", jsonResponse([1, 2, 3]));
+  let result = await fetchFirst([
+    { url: "/feed/empty", label: "empty", parse: arrayParse },
+    { url: "/feed/full", label: "full", parse: arrayParse },
+  ]);
+  ok(result.source === "full" && result.items.length === 3, "empty candidate skipped, next one wins", result.source);
+
+  // All candidates empty → the first empty answer wins, no error.
+  resetFetchStubs();
+  routes.set("/feed/a", jsonResponse([]));
+  routes.set("/feed/b", jsonResponse([]));
+  result = await fetchFirst([
+    { url: "/feed/a", label: "a", parse: arrayParse },
+    { url: "/feed/b", label: "b", parse: arrayParse },
+  ]);
+  ok(result.source === "a" && result.items.length === 0, "all-empty returns the first empty candidate", result.source);
+
+  // Failures after an empty answer still yield the empty result.
+  resetFetchStubs();
+  routes.set("/feed/a", jsonResponse([]));
+  deadUrls.push("/feed/b");
+  result = await fetchFirst([
+    { url: "/feed/a", label: "a", parse: arrayParse },
+    { url: "/feed/b", label: "b", parse: arrayParse },
+  ]);
+  ok(result.source === "a", "empty beats later failures", result.source);
+
+  // Every candidate failing → FeedError with the full attempt log.
+  resetFetchStubs();
+  deadUrls.push("/feed/a", "/feed/b");
+  let threw: unknown = null;
+  try {
+    await fetchFirst([
+      { url: "/feed/a", label: "a", parse: arrayParse },
+      { url: "/feed/b", label: "b", parse: arrayParse },
+    ]);
+  } catch (error) {
+    threw = error;
+  }
+  ok(threw instanceof FeedError && (threw as FeedError).attempts.length === 2, "all-fail throws FeedError with attempts");
+
+  // Non-array payloads (a catalogue object, say) are not "empty".
+  resetFetchStubs();
+  routes.set("/feed/map", jsonResponse({ sized: "payload" }));
+  routes.set("/feed/late", jsonResponse([9]));
+  const mapResult = await fetchFirst<Record<string, unknown>>([
+    { url: "/feed/map", label: "map", parse: (raw) => raw as Record<string, unknown> },
+    { url: "/feed/late", label: "late", parse: (raw) => (Array.isArray(raw) ? { list: raw } : {}) },
+  ]);
+  ok(mapResult.source === "map", "non-array payloads win immediately", mapResult.source);
+}
+
+/** Great-circle angular distance in degrees (exact 3D dot product). */
+function angularDistanceDeg(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const toRad = Math.PI / 180;
+  const vector = (p: { lat: number; lng: number }) => [
+    Math.cos(p.lat * toRad) * Math.cos(p.lng * toRad),
+    Math.cos(p.lat * toRad) * Math.sin(p.lng * toRad),
+    Math.sin(p.lat * toRad),
+  ];
+  const [ax, ay, az] = vector(a);
+  const [bx, by, bz] = vector(b);
+  const dot = ax * bx + ay * by + az * bz;
+  return Math.acos(Math.max(-1, Math.min(1, dot))) / toRad;
+}
+
+function testTerminator(): void {
+  console.log("\n🌗  day/night terminator");
+
+  // The terminator is the great circle 90° from the subsolar point; its
+  // latitude span is ±(90 − |solar declination|).
+  const cases: Array<{ label: string; date: string; expectedSpan: number }> = [
+    { label: "June solstice", date: "2026-06-21T12:00:00Z", expectedSpan: 66.56 },
+    { label: "March equinox", date: "2026-03-20T12:00:00Z", expectedSpan: 90 },
+    { label: "September equinox", date: "2026-09-23T12:00:00Z", expectedSpan: 90 },
+  ];
+
+  for (const testCase of cases) {
+    const date = new Date(testCase.date);
+    const sun = subsolarPoint(date);
+    const ring = terminatorRing(date);
+
+    ok(ring.length >= 180, `${testCase.label}: ring sampled densely`, ring.length);
+
+    let worstDeviation = 0;
+    for (const [lng, lat] of ring) {
+      worstDeviation = Math.max(worstDeviation, Math.abs(angularDistanceDeg({ lat, lng }, sun) - 90));
+    }
+    ok(worstDeviation < 0.02, `${testCase.label}: every ring point is 90° from the subsolar point`, worstDeviation.toFixed(4));
+
+    const latSpan = Math.max(...ring.map(([, lat]) => Math.abs(lat)));
+    ok(
+      Math.abs(latSpan - testCase.expectedSpan) < 0.35,
+      `${testCase.label}: latitude span ±${testCase.expectedSpan}°`,
+      latSpan.toFixed(2)
+    );
+
+    let maxStep = 0;
+    for (let index = 1; index < ring.length; index += 1) {
+      const previous = { lat: ring[index - 1][1], lng: ring[index - 1][0] };
+      const current = { lat: ring[index][1], lng: ring[index][0] };
+      maxStep = Math.max(maxStep, angularDistanceDeg(previous, current));
+    }
+    ok(maxStep < 3, `${testCase.label}: ring is contiguous (no pole snap)`, maxStep.toFixed(2));
+  }
+
+  // Right now: the span must match today's solar declination exactly.
+  const now = new Date();
+  const sun = subsolarPoint(now);
+  const ring = terminatorRing(now);
+  const latSpan = Math.max(...ring.map(([, lat]) => Math.abs(lat)));
+  ok(
+    Math.abs(latSpan - (90 - Math.abs(sun.lat))) < 0.02,
+    "today: span tracks the live solar declination",
+    { span: latSpan.toFixed(2), declination: sun.lat.toFixed(2) }
+  );
+  ok(
+    ring.every(([lng, lat]) => Math.abs(angularDistanceDeg({ lat, lng }, sun) - 90) < 0.02),
+    "today: ring sits on the day/night boundary"
+  );
+
+  // Subsolar sanity: solstice declination and a near-noon longitude.
+  const june = subsolarPoint(new Date("2026-06-21T12:00:00Z"));
+  ok(Math.abs(june.lat - 23.44) < 0.2, "June solstice subsolar latitude ≈ 23.44°N", june.lat.toFixed(2));
+  ok(Math.abs(june.lng) < 4, "12:00 UTC subsolar longitude near 0°", june.lng.toFixed(2));
+}
+
+function testEntityShapes(): void {
+  console.log("\n🧊  entity shape prototypes");
+
+  const color = "#38bdf8";
+  const kinds: EntityKind[] = [
+    "iss",
+    "aircraft",
+    "military",
+    "vessel",
+    "satellite",
+    "quake",
+    "fire",
+    "volcano",
+    "storm",
+    "flood",
+    "webcam",
+    "mapillary",
+    "radio",
+    "launch",
+    "site",
+  ];
+
+  for (const kind of kinds) {
+    const geometry = prototypeFor(kind, color);
+    const position = geometry.getAttribute("position");
+    const colors = geometry.getAttribute("color");
+    ok(Boolean(position && colors), `${kind}: position + color attributes present`);
+
+    let finite = true;
+    for (let index = 0; index < position.array.length; index += 1) {
+      if (!Number.isFinite(position.array[index])) {
+        finite = false;
+        break;
+      }
+    }
+    ok(finite, `${kind}: all vertex positions finite`);
+
+    geometry.computeBoundingSphere();
+    ok(
+      geometry.boundingSphere !== null &&
+        Number.isFinite(geometry.boundingSphere.radius) &&
+        geometry.boundingSphere.radius > 0,
+      `${kind}: bounding sphere computable`
+    );
+  }
+
+  ok(prototypeFor("aircraft", color) === prototypeFor("aircraft", color), "prototypes cached per (kind, colour)");
+  ok(prototypeFor("aircraft", color) !== prototypeFor("aircraft", "#f472b6"), "colour is part of the cache key");
+
+  const entity = (kind: EntityKind, meta?: Record<string, unknown>) =>
+    ({ kind, id: "test", lat: 0, lng: 0, label: "test", meta }) as Entity;
+  ok(headingDegrees(entity("aircraft", { Heading: 350 })) === 350, "aircraft heading read from meta");
+  ok(headingDegrees(entity("military", { Heading: "92.5" })) === 92.5, "military heading parses strings");
+  ok(headingDegrees(entity("vessel", { Course: -90 })) === 270, "vessel course normalised to 0–360");
+  ok(headingDegrees(entity("site")) === null, "kinds without a heading get null");
+
+  // three-globe deallocates removed objects; shared prototypes must survive.
+  const shared = prototypeFor("quake", color);
+  shared.dispose();
+  ok(prototypeFor("quake", color) === shared, "dispose is a no-op on shared prototypes");
+}
+
 function testEnvelopes(): void {
   console.log("\n📮  envelope + error handling");
 
@@ -798,6 +1037,9 @@ async function main(): Promise<void> {
     await testRadio();
     await testLaunches();
     await testSites();
+    await testFetchFirstFallthrough();
+    testTerminator();
+    testEntityShapes();
     testEnvelopes();
   } finally {
     globalThis.fetch = realFetch;
