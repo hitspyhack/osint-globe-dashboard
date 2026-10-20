@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const bbox = params.get("bbox");
   if (!bbox) {
-    return failure("bbox query parameter required");
+    // No viewport yet (or a native run): answer with the zoom hint rather
+    // than an error, so the layer shows green with an actionable label.
+    return envelope({ items: [], count: 0, source: "Mapillary — zoom in to query" });
   }
 
   // Our console bbox format is south,west,north,east; Mapillary wants
@@ -93,7 +95,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data, cached } = await fetchJson<{ features?: MapillaryFeature[] }>(
       `https://graph.mapillary.com/images?${query.toString()}`,
-      { ttlSeconds: 60, headers: { "User-Agent": "osint-globe-dashboard/0.4" } }
+      { ttlSeconds: 60, headers: { "User-Agent": "osint-globe-dashboard/0.5" } }
     );
 
     const items = normalise(data.features ?? []);

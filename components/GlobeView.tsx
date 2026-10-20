@@ -14,6 +14,12 @@ import {
   terminatorRing,
 } from "@/lib/geo";
 import { SENSOR_CHROME, SENSOR_PASSES, SHADER_VERTEX } from "@/lib/sensors";
+import {
+  headingDegrees,
+  OBJECT_BASE_SCALE,
+  prototypeFor,
+  SHARED_OBJECT_MATERIAL,
+} from "@/lib/entity-shapes";
 import { groundTrack, splitTle } from "@/lib/satellite-propagation";
 import { telemetry } from "@/lib/telemetry";
 import type { SatelliteRecord } from "@/lib/sources";
@@ -66,7 +72,7 @@ function pointAltitude(entity: Entity): number {
   if (entity.kind === "quake") {
     return style.altitude + Math.max(0, (entity.weight ?? 0) - 3) * 0.004;
   }
-  if (entity.kind === "aircraft" && entity.altitudeKm !== undefined) {
+  if ((entity.kind === "aircraft" || entity.kind === "military") && entity.altitudeKm !== undefined) {
     // Exaggerate flight levels so altitude differences read on a globe.
     return 0.004 + Math.min(entity.altitudeKm, 14) * 0.0008;
   }
@@ -142,6 +148,50 @@ interface PointDatum {
   entity: Entity;
 }
 
+/**
+ * One 3D entity rendered through the globe's objects layer. `rotation` is in
+ * degrees around the local up axis (nose-north baseline, so a heading rotates
+ * the shape clockwise when viewed from above); `scale` is the base world size
+ * before the camera-distance zoom factor.
+ */
+interface ObjectDatum {
+  lat: number;
+  lng: number;
+  altitude: number;
+  rotation: { x: number; y: number; z: number };
+  scale: number;
+  kind: EntityKind;
+  color: string;
+  layer: LayerId;
+  entity: Entity;
+  /** Retained mesh handle for camera-distance scaling. */
+  mesh?: THREE.Mesh;
+}
+
+/**
+ * Entity meshes are one draw call each, so the busiest layers keep a budget:
+ * over the cap the layer falls back to the (merged) points pipeline.
+ */
+const OBJECT_CAPS: Partial<Record<LayerId, number>> = {
+  flights: 3000,
+  military: 1500,
+};
+
+function objectScale(entity: Entity): number {
+  const base = OBJECT_BASE_SCALE[entity.kind];
+  if (entity.kind === "quake") {
+    return base * (1 + Math.max(0, (entity.weight ?? 0) - 3) * 0.3);
+  }
+  if (entity.kind === "storm") {
+    return base * (1 + Math.min(1.6, (entity.weight ?? 0) / 1000));
+  }
+  if (entity.kind === "mapillary") {
+    // 360° captures read slightly larger on the grid.
+    return base * (entity.weight ? 1.25 : 1);
+  }
+  return base;
+}
+
 type AnyGlobe = any;
 
 /** Scratch objects for the per-frame orientation / pan math (no allocation). */
@@ -203,6 +253,10 @@ export default function GlobeView({
   const lookAtRestoreRef = useRef<(() => void) | null>(null);
   const lastPointClickRef = useRef(0);
   const frameRef = useRef(0);
+  /** Current object datums — kept for camera-distance scaling passes. */
+  const objectsRef = useRef<ObjectDatum[]>([]);
+  /** Camera-distance size factor applied to every object mesh (see tick). */
+  const objectZoomRef = useRef(1);
   const [ready, setReady] = useState(false);
   const [failedTiles, setFailedTiles] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
@@ -293,7 +347,9 @@ export default function GlobeView({
               controls.autoRotateSpeed = SIDEREAL_AUTO_ROTATE_SPEED;
               controls.enableDamping = true;
               controls.dampingFactor = 0.12;
-              controls.minDistance = 101.5;
+              // Street-level access: ~4.5 km above the surface. Any closer and
+              // the renderer's 0.05 near plane starts z-fighting the tiles.
+              controls.minDistance = 100.07;
               controls.maxDistance = 900;
             }
 
@@ -406,7 +462,7 @@ export default function GlobeView({
         const pov = globeRef.current?.pointOfView();
         if (!pov) return;
         globeRef.current?.pointOfView(
-          { ...pov, altitude: Math.min(6, Math.max(0.02, pov.altitude * factor)) },
+          { ...pov, altitude: Math.min(6, Math.max(0.0008, pov.altitude * factor)) },
           600
         );
       },
@@ -431,7 +487,7 @@ export default function GlobeView({
         scratchDirection.multiplyScalar(1 / magnitude);
 
         // Steps scale with altitude: whole-globe views sweep fast, close-ups crawl.
-        const altitude = Math.min(3, Math.max(0.05, globe.pointOfView()?.altitude ?? 1));
+        const altitude = Math.min(3, Math.max(0.003, globe.pointOfView()?.altitude ?? 1));
         const delta = THREE.MathUtils.degToRad(
           PAN_SPEED_DEG_PER_SEC * altitude * magnitude * dtSeconds
         );
@@ -615,11 +671,81 @@ export default function GlobeView({
     aimSunlight(sunLightRef.current, simTime);
   }, [ready, simTime]);
 
+  /* ---------------- 3D entity objects ---------------- */
+
+  // Entities become recognisable 3D shapes (aircraft, vessels, satellites...)
+  // unless point merging is on or a layer blows past its mesh budget, in which
+  // case it stays on the cheaper points pipeline.
+  const objectPlan = useMemo(() => {
+    const datums: ObjectDatum[] = [];
+    const objectLayers = new Set<LayerId>();
+    if (!mergePoints) {
+      enabledSet.forEach((layer) => {
+        const items = entities[layer];
+        if (!items || !items.length) return;
+        const cap = OBJECT_CAPS[layer] ?? Number.POSITIVE_INFINITY;
+        if (items.length > cap) return;
+        const color = LAYER_BY_ID[layer]?.color ?? "#38bdf8";
+        objectLayers.add(layer);
+        items.forEach((entity) => {
+          if (!Number.isFinite(entity.lat) || !Number.isFinite(entity.lng)) return;
+          const heading = headingDegrees(entity);
+          datums.push({
+            lat: entity.lat,
+            lng: entity.lng,
+            altitude: pointAltitude(entity),
+            rotation:
+              heading === null ? { x: 0, y: 0, z: 0 } : { x: 0, y: 0, z: -heading },
+            scale: objectScale(entity),
+            kind: entity.kind,
+            color,
+            layer,
+            entity,
+          });
+        });
+      });
+    }
+    return { datums, objectLayers };
+  }, [entities, enabledSet, mergePoints]);
+
+  const objectThreeObject = useCallback((datum: ObjectDatum) => {
+    // One shared prototype + shared material per (kind, colour): each mesh is a
+    // single lightweight wrapper, and the baked-in scale keeps three-globe's
+    // position/rotation-only update path happy.
+    const mesh = new THREE.Mesh(prototypeFor(datum.kind, datum.color), SHARED_OBJECT_MATERIAL);
+    mesh.scale.setScalar(datum.scale * objectZoomRef.current);
+    datum.mesh = mesh;
+    return mesh;
+  }, []);
+
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!ready || !globe) return;
+
+    objectsRef.current = objectPlan.datums;
+
+    globe
+      .objectsData(objectPlan.datums)
+      .objectLat("lat")
+      .objectLng("lng")
+      .objectAltitude("altitude")
+      .objectRotation("rotation")
+      .objectThreeObject(objectThreeObject)
+      .objectLabel((d: object) => labelFor((d as ObjectDatum).entity))
+      .onObjectClick((datum: object) => {
+        lastPointClickRef.current = Date.now();
+        const item = datum as ObjectDatum;
+        selectRef.current({ entity: item.entity, layer: item.layer });
+      });
+  }, [objectPlan, ready, objectThreeObject]);
+
   /* ---------------- points ---------------- */
 
   const points = useMemo(() => {
     const list: PointDatum[] = [];
+    const { objectLayers } = objectPlan;
     enabledSet.forEach((layer) => {
+      if (objectLayers.has(layer)) return; // rendered as 3D objects instead
       const items = entities[layer];
       if (!items) return;
       const color = LAYER_BY_ID[layer]?.color ?? "#38bdf8";
@@ -637,7 +763,7 @@ export default function GlobeView({
       });
     });
     return list;
-  }, [entities, enabledSet]);
+  }, [entities, enabledSet, objectPlan]);
 
   useEffect(() => {
     const globe = globeRef.current;
@@ -1039,6 +1165,22 @@ export default function GlobeView({
         ) {
           lastPov = pov;
           povRef.current?.(pov);
+        }
+
+        // Camera-distance scaling for 3D entity objects: shapes hold a roughly
+        // constant share of the viewport down to street level, then stop
+        // growing once the camera pulls past the default view distance.
+        // three-globe never touches mesh scale, so this is applied directly.
+        if (typeof pov.altitude === "number") {
+          const factor = Math.min(1, Math.max(0.02, pov.altitude / 2.4));
+          const previous = objectZoomRef.current;
+          if (Math.abs(factor - previous) > Math.max(0.002, previous * 0.04)) {
+            objectZoomRef.current = factor;
+            const datums = objectsRef.current;
+            for (let index = 0; index < datums.length; index += 1) {
+              datums[index].mesh?.scale.setScalar(datums[index].scale * factor);
+            }
+          }
         }
 
         // Feed the camera to the slippy-tile engine (throttled).

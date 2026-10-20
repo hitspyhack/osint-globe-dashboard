@@ -12,10 +12,11 @@ const OVERPASS_MIRRORS = [
 /** Public cameras mapped in OpenStreetMap — keyless, but Overpass is slow. */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const bbox = params.get("bbox") ?? "-180,-85,180,85";
-  const [west, south, east, north] = bbox.split(",").map((value) => Number.parseFloat(value));
+  // Console bbox format: south,west,north,east. Missing/invalid → global.
+  const bbox = params.get("bbox") ?? "-85,-180,85,180";
+  const [south, west, north, east] = bbox.split(",").map((value) => Number.parseFloat(value));
   const bounds =
-    [west, south, east, north].every((value) => Number.isFinite(value))
+    [south, west, north, east].every((value) => Number.isFinite(value)) && north > south && east > west
       ? { south, west, north, east }
       : { south: -85, west: -180, north: 85, east: 180 };
 
